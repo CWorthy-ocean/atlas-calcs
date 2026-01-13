@@ -10,19 +10,32 @@ This module provides functions and classes for:
 # Standard library imports
 import os
 from pathlib import Path
+from subprocess import check_output, check_call
 
-# Third-party imports   
+
+import tempfile
+import time
+import textwrap
+
 import numpy as np
 import s3fs
+
 import xarray as xr
+import dask
+from dask.distributed import Client
+
 from shapely.geometry import MultiPoint, Point
 from shapely.prepared import prep
 
-# Module-level constants
-CACHE_DIR = "atlas_cache"
 
-CACHE_DIR_ROOT = Path(os.environ.get("SCRATCH", Path(os.environ.get("HOME")) / "scratch"))
-CACHE_DIR = CACHE_DIR_ROOT / "atlas_cache"
+
+# Module-level constants
+USER = os.environ["USER"]
+
+JUPYTERHUB_URL = "https://jupyter.nersc.gov"
+
+SCRATCH = Path(os.environ.get("SCRATCH", Path(os.environ.get("HOME")) / "scratch"))
+CACHE_DIR = SCRATCH / "atlas_cache"
 
 S3_BASE_URL = "s3://us-west-2.opendata.source.coop/cworthy/oae-efficiency-atlas/data"
 DAYS_PER_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
@@ -364,7 +377,6 @@ class AtlasModelGridAnalyzer:
         within_mask = within_mask_flat.reshape(nlat, nlon)
         self.polygon_id_mask = self.polygon_id_mask.where(within_mask, -1).where(self.atlas_grid.KMT > 0)
 
-
     def set_field_within_boundaries(self, field_by_id):
         """
         Set fields within boundaries.
@@ -538,4 +550,96 @@ class AtlasModelGridAnalyzer:
             result = result.assign_coords(polygon_id=polygon_id)
             datasets.append(result)
         # Concatenate along polygon_id dimension
-        return xr.concat(datasets, dim='polygon_id')
+        return xr.concat(datasets, dim='polygon_id').compute()
+
+
+class dask_cluster(object):
+    """ad hoc script to launch a dask cluster"""
+
+    def __init__(self, account, wallclock="04:00:00"):
+        path_dask = f"{SCRATCH}/dask"
+        os.makedirs(path_dask, exist_ok=True)
+
+        scheduler_file = tempfile.mktemp(
+            prefix="dask_scheduler_file.", suffix=".json", dir=path_dask
+        )
+
+        script = textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            #SBATCH --job-name dask-worker
+            #SBATCH --account {account}
+            #SBATCH --qos=premium
+            #SBATCH --nodes=4
+            #SBATCH --ntasks=64
+            #SBATCH --time={wallclock}
+            #SBATCH --constraint=cpu
+            #SBATCH --error {path_dask}/dask-workers/dask-worker-%J.err
+            #SBATCH --output {path_dask}/dask-workers/dask-worker-%J.out
+
+            echo "Starting scheduler..."
+
+            scheduler_file={scheduler_file}
+            rm -f $scheduler_file
+
+            module load python
+            conda activate cworthy
+
+            #start scheduler
+            DASK_DISTRIBUTED__COMM__TIMEOUTS__CONNECT=3600s \
+            DASK_DISTRIBUTED__COMM__TIMEOUTS__TCP=3600s \
+            dask scheduler \
+                --interface hsn0 \
+                --scheduler-file $scheduler_file &
+
+            dask_pid=$!
+
+            # Wait for the scheduler to start
+            sleep 5
+            until [ -f $scheduler_file ]
+            do
+                 sleep 5
+            done
+
+            echo "Starting workers"
+
+            #start scheduler
+            DASK_DISTRIBUTED__COMM__TIMEOUTS__CONNECT=3600s \
+            DASK_DISTRIBUTED__COMM__TIMEOUTS__TCP=3600s \
+            srun dask-worker \
+            --scheduler-file $scheduler_file \
+                --interface hsn0 \
+                --nworkers 1 
+
+            echo "Killing scheduler"
+            kill -9 $dask_pid
+            """
+        )
+
+        script_file = tempfile.mktemp(prefix="launch-dask.", dir=path_dask)
+        with open(script_file, "w") as fid:
+            fid.write(script)
+
+        print(f"spinning up dask cluster with scheduler:\n  {scheduler_file}")
+        self.jobid = (
+            check_output(f"sbatch {script_file} " + "awk '{print $1}'", shell=True)
+            .decode("utf-8")
+            .strip()
+            .split(" ")[-1]
+        )
+
+        while not os.path.exists(scheduler_file):
+            time.sleep(5)
+
+        print("cluster running...")
+
+        dask.config.config["distributed"]["dashboard"][
+            "link"
+        ] = "{JUPYTERHUB_SERVICE_PREFIX}proxy/{host}:{port}/status"
+
+        self.client = Client(scheduler_file=scheduler_file)
+        print(f"Dashboard:\n {JUPYTERHUB_URL}/{self.client.dashboard_link}")
+
+    def shutdown(self):
+        self.client.shutdown()
+        check_call(f"scancel {self.jobid}", shell=True)
