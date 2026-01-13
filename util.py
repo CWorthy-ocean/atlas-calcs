@@ -89,6 +89,61 @@ def points_within_grid_boundaries(model_grid, points_lat, points_lon):
     return np.where(within_bounds)[0]
 
 
+def _get_atlas_file_info(polygon_id, injection_year, injection_month, year, month):
+    """
+    Get S3 file path and local cache path for a given polygon and time period.
+    
+    Parameters
+    ----------
+    polygon_id : int
+        Polygon ID.
+    injection_year : int
+        Injection year.
+    injection_month : int
+        Injection month (1-12).
+    year : int
+        Year of the data file.
+    month : int
+        Month of the data file (1-12).
+    
+    Returns
+    -------
+    tuple
+        (s3_file_path, cache_path) tuple.
+    
+    Raises
+    ------
+    ValueError
+        If exactly one matching file is not found in S3.
+    """
+    fs = s3fs.S3FileSystem(anon=True)
+    
+    # Construct S3 path
+    s3_prefix = f"{S3_BASE_URL}/experiments/{polygon_id:03d}/{injection_month:02d}/"
+    all_files = fs.ls(s3_prefix)
+    
+    # Filter files to include only those ending in {year:04d}-{month:02d}.nc
+    pattern = f"{year:04d}-{month:02d}.nc"
+    s3_files = [f for f in all_files if f.endswith(pattern)]
+    
+    if len(s3_files) != 1:
+        raise ValueError(
+            f"Expected exactly 1 file matching pattern {pattern} in {s3_prefix}, "
+            f"found {len(s3_files)}"
+        )
+    
+    s3_file = s3_files[0]
+    
+    # Construct local cache path
+    cache_path = (
+        Path(CACHE_DIR) 
+        / f"experiments/{polygon_id:03d}/{injection_month:02d}" 
+        / os.path.basename(s3_file)
+    )
+    
+    return s3_file, cache_path
+
+
 def get_atlas_data(polygon_id, injection_year, injection_month, year, month, force_download=False):
     """
     Retrieve atlas data from S3 for a given polygon, injection date, and time period.
@@ -118,7 +173,7 @@ def get_atlas_data(polygon_id, injection_year, injection_month, year, month, for
     
     Raises
     ------
-    AssertionError
+    ValueError
         If exactly one matching file is not found in S3.
     """
     # Convert to integers to ensure proper formatting
@@ -128,34 +183,15 @@ def get_atlas_data(polygon_id, injection_year, injection_month, year, month, for
     year = int(year)
     month = int(month)
     
-    fs = s3fs.S3FileSystem(anon=True)
-    
-    # Construct S3 path
-    s3_prefix = f"{S3_BASE_URL}/experiments/{polygon_id:03d}/{injection_month:02d}/"
-    all_files = fs.ls(s3_prefix)
-    
-    # Filter files to include only those ending in {year:04d}-{month:02d}.nc
-    pattern = f"{year:04d}-{month:02d}.nc"
-    s3_files = [f for f in all_files if f.endswith(pattern)]
-    
-    if len(s3_files) != 1:
-        raise ValueError(
-            f"Expected exactly 1 file matching pattern {pattern} in {s3_prefix}, "
-            f"found {len(s3_files)}"
-        )
-    
-    s3_file = s3_files[0]
-    
-    # Construct local cache path
-    cache_path = (
-        Path(CACHE_DIR) 
-        / f"experiments/{polygon_id:03d}/{injection_month:02d}" 
-        / os.path.basename(s3_file)
+    s3_file, cache_path = _get_atlas_file_info(
+        polygon_id, injection_year, injection_month, year, month
     )
+    
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     
     # Check if file exists locally and download if needed
     if force_download or not cache_path.exists():
+        fs = s3fs.S3FileSystem(anon=True)
         fs.get(s3_file, str(cache_path))
     
     return cache_path
@@ -164,6 +200,9 @@ def get_atlas_data(polygon_id, injection_year, injection_month, year, month, for
 def read_alk_forcing_files(polygon_id, injection_year, injection_month, years, months):
     """
     Read and combine alk-forcing files for a given polygon ID and time period.
+    
+    First assesses which files need to be downloaded, notifies the user, then downloads
+    and reads all files.
     
     Parameters
     ----------
@@ -193,18 +232,51 @@ def read_alk_forcing_files(polygon_id, injection_year, injection_month, years, m
     if months is None or len(months) == 0:
         raise ValueError("months must be provided as a non-empty list")
     
-    files = []
+    # Convert to integers
+    polygon_id = int(polygon_id)
+    injection_year = int(injection_year)
+    injection_month = int(injection_month)
+    
+    # Step 1: Assess which files need to be downloaded
+    files_to_download = []
+    cache_paths = []
+    
     for year in years:
         for month in months:
-            filepath = get_atlas_data(
-                polygon_id, injection_year, injection_month, year, month, 
-                force_download=False
-            )
-            if not filepath.exists():
-                raise FileNotFoundError(
-                    f"File not found after download attempt: {filepath}"
+            try:
+                s3_file, cache_path = _get_atlas_file_info(
+                    polygon_id, injection_year, injection_month, year, month
                 )
-            files.append(str(filepath))
+                cache_paths.append(cache_path)
+                
+                # Check if file needs downloading
+                if not cache_path.exists():
+                    files_to_download.append((s3_file, cache_path))
+            except ValueError as e:
+                raise FileNotFoundError(f"Could not find file for year={year}, month={month}: {e}")
+    
+    # Step 2: Notify user and download files if needed
+    if files_to_download:
+        n_files = len(files_to_download)
+        print(f"Downloading {n_files} file(s) from S3...")
+        
+        fs = s3fs.S3FileSystem(anon=True)
+        for s3_file, cache_path in files_to_download:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            fs.get(s3_file, str(cache_path))
+        
+        print(f"Downloaded {n_files} file(s).")
+    else:
+        print(f"Using cached files for all {len(cache_paths)} requested file(s).")
+    
+    # Step 3: Verify all files exist and read them
+    files = []
+    for cache_path in cache_paths:
+        if not cache_path.exists():
+            raise FileNotFoundError(
+                f"File not found after download attempt: {cache_path}"
+            )
+        files.append(str(cache_path))
     
     # Open and combine datasets
     # Use compat='override' to skip coordinate checking for faster loading
