@@ -373,9 +373,10 @@ class AtlasModelGridAnalyzer:
         if 'FG_ALT_CO2' not in ds:
             raise KeyError("FG_ALT_CO2 variable not found in dataset")
 
-        # Create time_delta DataArray with days per month, matching the months list
+        # Create time_delta DataArray with days per month, replicating months for each year
+        # For each year, repeat the months list
         time_delta_seconds = xr.DataArray(
-            [DAYS_PER_MONTH[m - 1] * 86400.0 for m in months],
+            [DAYS_PER_MONTH[m - 1] * 86400.0 for _ in years for m in months],
             dims=['elapsed_time'],
             coords={'elapsed_time': ds.elapsed_time} if 'elapsed_time' in ds.coords else None
         )
