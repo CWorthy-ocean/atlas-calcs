@@ -152,10 +152,7 @@ def get_atlas_data(polygon_id, injection_year, injection_month, year, month, for
     
     # Check if file exists locally and download if needed
     if force_download or not cache_path.exists():
-        print(f"Downloading {s3_file} to {cache_path}")
         fs.get(s3_file, str(cache_path))
-    else:
-        print(f"Using cached file: {cache_path}")
     
     return cache_path
 
