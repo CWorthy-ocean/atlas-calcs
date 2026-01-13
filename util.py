@@ -583,7 +583,7 @@ class dask_cluster(object):
             rm -f $scheduler_file
 
             module load python
-            conda activate cworthy
+            conda activate atlas-calcs
 
             #start scheduler
             DASK_DISTRIBUTED__COMM__TIMEOUTS__CONNECT=3600s \
