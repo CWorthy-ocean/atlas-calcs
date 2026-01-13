@@ -13,6 +13,7 @@ from pathlib import Path
 from subprocess import check_output, check_call
 
 
+import logging
 import tempfile
 import time
 import textwrap
@@ -444,7 +445,11 @@ class AtlasModelGridAnalyzer:
         KeyError
             If FG_CO2 variable is not found in dataset.
         """
+        start_time = time.time()
+        logger = logging.getLogger(__name__)
+        
         # Validate and set default months
+        t0 = time.time()
         if months is None:
             months = list(range(1, 13))
         else:
@@ -454,43 +459,58 @@ class AtlasModelGridAnalyzer:
                 raise ValueError("months must be a list of integers")
             if not all(1 <= m <= 12 for m in months):
                 raise ValueError("months must be integers between 1 and 12")
+        logger.info(f"Validation and setup: {time.time() - t0:.2f}s")
         
         # Read alk-forcing data
+        t0 = time.time()
+        logger.info(f"Reading alk-forcing files for polygon_id={polygon_id}, years={years}, months={months}")
         ds = read_alk_forcing_files(
             polygon_id, injection_year, injection_month, years, months
         )
+        logger.info(f"Reading files completed: {time.time() - t0:.2f}s")
 
         # Get FG_CO2 data
+        t0 = time.time()
         if 'FG_CO2' not in ds:
             raise KeyError("FG_CO2 variable not found in dataset")
         
         if 'FG_ALT_CO2' not in ds:
             raise KeyError("FG_ALT_CO2 variable not found in dataset")
+        logger.info(f"Variable checks: {time.time() - t0:.2f}s")
 
         # Create time_delta DataArray with days per month, replicating months for each year
         # For each year, repeat the months list
+        t0 = time.time()
         time_delta_seconds = xr.DataArray(
             [DAYS_PER_MONTH[m - 1] * 86400.0 for _ in years for m in months],
             dims=['elapsed_time'],
             coords={'elapsed_time': ds.elapsed_time} if 'elapsed_time' in ds.coords else None
         )
+        logger.info(f"Creating time_delta DataArray: {time.time() - t0:.2f}s")
         
         # Get TAREA for area weighting
+        t0 = time.time()
         tarea = self.atlas_grid.TAREA
         nlat, nlon = tarea.shape
+        logger.info(f"Getting TAREA (shape={nlat}x{nlon}): {time.time() - t0:.2f}s")
 
         # Select the appropriate polygon and injection date
         injection_date = f"{injection_year:04d}-{injection_month:02d}"
 
         # Get indices within boundaries if not already computed
+        t0 = time.time()
         if self._within_boundaries_indices is None:
             self._get_polygon_ids_within_boundaries()
+        logger.info(f"Getting boundary indices: {time.time() - t0:.2f}s")
         
         # Create mask for points within grid boundaries
+        t0 = time.time()
         within_mask = np.zeros((nlat, nlon), dtype=bool)
         within_mask.ravel()[self._within_boundaries_indices] = True
-        
+        logger.info(f"Creating within_mask: {time.time() - t0:.2f}s")
 
+        # Select and process FG_CO2 data
+        t0 = time.time()
         fg_co2_alt_co2 = ds.FG_ALT_CO2.sel(
             polygon_id=polygon_id, injection_date=injection_date
         ).squeeze()
@@ -502,8 +522,10 @@ class AtlasModelGridAnalyzer:
 
         fg_co2_additional = fg_co2 - fg_co2_alt_co2 # nmol/cm2/s
         fg_co2_additional *= 1e-9 # mol/cm2/s
+        logger.info(f"Selecting and processing FG_CO2 data: {time.time() - t0:.2f}s")
 
         # Compute cumulative integrals
+        t0 = time.time()
         fg_co2_int_within = (
             (fg_co2_additional * time_delta_seconds * tarea.where(within_mask))
             .sum(dim=['nlat', 'nlon'])
@@ -515,6 +537,10 @@ class AtlasModelGridAnalyzer:
             .cumsum(dim='elapsed_time')
         )
         fraction = fg_co2_int_within / fg_co2_int_total
+        logger.info(f"Computing cumulative integrals: {time.time() - t0:.2f}s")
+        
+        total_time = time.time() - start_time
+        logger.info(f"Total integration time: {total_time:.2f}s")
         
         # Return as xarray Dataset
         return xr.Dataset({
@@ -559,13 +585,13 @@ class AtlasModelGridAnalyzer:
             result = result.assign_coords(polygon_id=polygon_id)
             datasets.append(result)
         # Concatenate along polygon_id dimension
-        return xr.concat(datasets, dim='polygon_id').compute()
+        return xr.concat(datasets, dim='polygon_id')
 
 
 class dask_cluster(object):
     """ad hoc script to launch a dask cluster"""
 
-    def __init__(self, account, n_nodes=4, wallclock="04:00:00"):
+    def __init__(self, account, n_nodes=4, n_tasks_per_node=64, wallclock="04:00:00"):
         path_dask = f"{SCRATCH}/dask"
         os.makedirs(path_dask, exist_ok=True)
 
@@ -580,7 +606,7 @@ class dask_cluster(object):
             #SBATCH --account {account}
             #SBATCH --qos=premium
             #SBATCH --nodes={n_nodes}
-            #SBATCH --ntasks-per-node=64
+            #SBATCH --ntasks-per-node={n_tasks_per_node}
             #SBATCH --time={wallclock}
             #SBATCH --constraint=cpu
             #SBATCH --error {path_dask}/dask-workers/dask-worker-%J.err
