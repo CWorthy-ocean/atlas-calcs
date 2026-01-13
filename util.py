@@ -293,7 +293,16 @@ def read_alk_forcing_files(polygon_id, injection_year, injection_month, years, m
     
     # Open and combine datasets
     # Use compat='override' to skip coordinate checking for faster loading
-    return xr.open_mfdataset(files, decode_timedelta=True, compat='override', coords='minimal')
+    # parallel=True enables parallel file opening (if backend supports it)
+    # data_vars='minimal' reduces data loading overhead
+    return xr.open_mfdataset(
+        files, 
+        decode_timedelta=True, 
+        compat='override', 
+        coords='minimal',
+        data_vars='minimal',
+        parallel=True
+    )
 
 
 class AtlasModelGridAnalyzer:
@@ -556,7 +565,7 @@ class AtlasModelGridAnalyzer:
 class dask_cluster(object):
     """ad hoc script to launch a dask cluster"""
 
-    def __init__(self, account, wallclock="04:00:00"):
+    def __init__(self, account, n_nodes=4, wallclock="04:00:00"):
         path_dask = f"{SCRATCH}/dask"
         os.makedirs(path_dask, exist_ok=True)
 
@@ -570,8 +579,8 @@ class dask_cluster(object):
             #SBATCH --job-name dask-worker
             #SBATCH --account {account}
             #SBATCH --qos=premium
-            #SBATCH --nodes=4
-            #SBATCH --ntasks=64
+            #SBATCH --nodes={n_nodes}
+            #SBATCH --ntasks-per-node=64
             #SBATCH --time={wallclock}
             #SBATCH --constraint=cpu
             #SBATCH --error {path_dask}/dask-workers/dask-worker-%J.err
