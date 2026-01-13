@@ -11,7 +11,7 @@ This module provides functions and classes for:
 import os
 from pathlib import Path
 
-# Third-party imports
+# Third-party imports   
 import numpy as np
 import s3fs
 import xarray as xr
@@ -20,6 +20,10 @@ from shapely.prepared import prep
 
 # Module-level constants
 CACHE_DIR = "atlas_cache"
+
+CACHE_DIR_ROOT = Path(os.environ.get("SCRATCH", Path(os.environ.get("HOME")) / "scratch"))
+CACHE_DIR = CACHE_DIR_ROOT / "atlas_cache"
+
 S3_BASE_URL = "s3://us-west-2.opendata.source.coop/cworthy/oae-efficiency-atlas/data"
 DAYS_PER_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
