@@ -76,10 +76,15 @@ class dask_cluster(object):
             )
 
         self.local_cluster = False
-        self.dashboard_link = f"{JUPYTERHUB_URL}proxy/{{host}}:{{port}}/status"
         dask.config.config["distributed"]["dashboard"]["link"] = self.dashboard_link
+        dask.config.config["distributed"]["dashboard"][
+            "link"
+        ] = "{JUPYTERHUB_SERVICE_PREFIX}proxy/{host}:{port}/status"
         
+
+        self.dashboard_link = f"{JUPYTERHUB_URL}/{self.client.dashboard_link}"
         self.client = Client(scheduler_file=self.scheduler_file)
+
         print(f"Dashboard:\n {self.dashboard_link}")
 
     def _launch_dask_cluster(self, account, n_nodes, n_tasks_per_node, wallclock, queue_name):

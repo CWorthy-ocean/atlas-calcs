@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if ! command -v conda >/dev/null 2>&1; then
+  if command -v module >/dev/null 2>&1; then
+    module load conda
+  fi
+fi
+
 if command -v conda >/dev/null 2>&1; then
   set +u
   source "$(conda info --base)/etc/profile.d/conda.sh"
