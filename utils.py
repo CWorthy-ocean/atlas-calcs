@@ -67,7 +67,7 @@ class dask_cluster(object):
         
         else:
             if account is None:
-                raise ValueError("account is required when not using a scheduler file")
+                raise ValueError("account is required to launch a dask cluster")
             self.scheduler_file, self.jobid = self._launch_dask_cluster(
                 account=account,
                 n_nodes=n_nodes,
