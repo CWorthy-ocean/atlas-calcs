@@ -153,6 +153,13 @@ class dask_cluster(object):
             fid.write(script)
 
         print(f"spinning up dask cluster with scheduler:\n  {scheduler_file}")
+        print(
+            "  nodes: {nodes}, tasks_per_node: {tasks}, wallclock: {wallclock}".format(
+                nodes=n_nodes,
+                tasks=n_tasks_per_node,
+                wallclock=wallclock,
+            )
+        )
         jobid = (
             check_output(f"sbatch {script_file} " + "awk '{print $1}'", shell=True)
             .decode("utf-8")
