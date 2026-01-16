@@ -3,7 +3,7 @@ dask_cluster_kwargs:
   queue_name: premium
   n_nodes: 1
   n_tasks_per_node: 128
-  wallclock: 02:00:00
+  wallclock: 06:00:00
   scheduler_file: null
 
 notebooks:
