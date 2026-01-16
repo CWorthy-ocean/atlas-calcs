@@ -27,7 +27,21 @@ class NotebookEntry(BaseModel):
 class NotebookList(BaseModel):
     """Schema for a list of notebook entries."""
 
+    title: str
     notebooks: list[NotebookEntry]
+
+    def to_toc_entry(self, base_dir: Optional[Path] = None) -> Dict[str, Any]:
+        children = []
+        for entry in self.notebooks:
+            output_path = Path(entry.config.output_path)
+            if base_dir is not None:
+                if output_path.is_absolute():
+                    try:
+                        output_path = output_path.relative_to(base_dir)
+                    except ValueError:
+                        pass
+            children.append({"file": str(output_path)})
+        return {"title": self.title, "children": children}
 
 class DaskClusterKwargs(BaseModel):
     """Schema for dask_cluster_kwargs configuration."""
@@ -48,6 +62,11 @@ class AppConfig(BaseModel):
 
 
 def _parse_notebook_entries(raw_entries: Any, base_dir: Path) -> NotebookList:
+    if isinstance(raw_entries, dict):
+        title = raw_entries.get("title", "Untitled")
+        raw_entries = raw_entries.get("notebooks")
+    else:
+        title = "Untitled"
     if not isinstance(raw_entries, list):
         raise ValueError("notebooks must be a list of entries.")
     entries = []
@@ -73,7 +92,7 @@ def _parse_notebook_entries(raw_entries: Any, base_dir: Path) -> NotebookList:
             output_path=output_path,
         )
         entries.append(NotebookEntry(notebook_name=notebook_name, config=config))
-    return NotebookList(notebooks=entries)
+    return NotebookList(title=title, notebooks=entries)
 
 
 def load_yaml_params(path: Optional[Union[Path, str]]) -> Dict[str, Any]:

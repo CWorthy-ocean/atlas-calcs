@@ -1,0 +1,58 @@
+{
+  "input": {
+    "files": [],
+    "opts": {
+      "execute": false,
+      "pdf": true,
+      "tex": false,
+      "typst": false,
+      "docx": false,
+      "md": false,
+      "xml": false,
+      "meca": false,
+      "cff": false,
+      "site": false,
+      "html": false,
+      "all": false,
+      "doiBib": false,
+      "watch": false,
+      "force": false,
+      "checkLinks": false,
+      "strict": false,
+      "ci": false,
+      "maxSizeWebp": 1572864,
+      "keepHost": false
+    }
+  },
+  "exports": [
+    {
+      "format": "pdf",
+      "template": "plain_latex_book",
+      "output": "/Users/mclong/codes/atlas-calcs/_build/exports/myst.pdf",
+      "articles": [
+        {
+          "file": "/Users/mclong/codes/atlas-calcs/executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_gulf-guinea-toy.ipynb",
+          "level": 1,
+          "slug": "regional-domain-sizing-cson-roms-marbl-v0-1-gulf-g"
+        },
+        {
+          "file": "/Users/mclong/codes/atlas-calcs/executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_hvalfjörður-0.ipynb",
+          "level": 1,
+          "slug": "regional-domain-sizing-cson-roms-marbl-v0-1-hvalfj"
+        },
+        {
+          "file": "/Users/mclong/codes/atlas-calcs/executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_test-tiny.ipynb",
+          "level": 1,
+          "slug": "regional-domain-sizing-cson-roms-marbl-v0-1-test-t"
+        },
+        {
+          "file": "/Users/mclong/codes/atlas-calcs/executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_wio-toy.ipynb",
+          "level": 1,
+          "slug": "regional-domain-sizing-cson-roms-marbl-v0-1-wio-to"
+        }
+      ],
+      "$file": "/Users/mclong/codes/atlas-calcs/myst.yml",
+      "$project": "/Users/mclong/codes/atlas-calcs"
+    }
+  ]
+}

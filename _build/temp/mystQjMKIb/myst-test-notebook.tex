@@ -1,0 +1,40 @@
+\begin{verbatim}
+%load_ext autoreload
+%autoreload 2
+
+import sys
+from pathlib import Path
+
+repo_root = Path().resolve().parents[0]  # if in subdir
+sys.path.insert(0, str(repo_root))
+
+import roms_tools as rt
+
+import cdr_atlas
+import application
+import utils
+\end{verbatim}
+
+\begin{verbatim}
+The autoreload extension is already loaded. To reload it, use:
+  %reload_ext autoreload
+\end{verbatim}
+
+\begin{verbatim}
+yaml_path = Path("_grid.yml")
+\end{verbatim}
+
+\begin{verbatim}
+grid = application.load_roms_tools_object(yaml_path, "roms -tools")    
+grid
+\end{verbatim}
+
+\begin{verbatim}
+Grid(nx=6, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10, N=3, theta_s=5.0, theta_b=2.0, hc=250.0, topography_source={'name': 'ETOPO5'}, hmin=5.0, verbose=False, straddle=True)
+\end{verbatim}
+
+\begin{verbatim}
+grid.plot()
+\end{verbatim}
+
+\includegraphics[width=0.7\linewidth]{files/d25a9da8ac4ff9ca285b5fd74108e835.png}

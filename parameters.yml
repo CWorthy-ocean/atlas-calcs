@@ -7,35 +7,42 @@ dask_cluster_kwargs:
   scheduler_file: null
 
 notebooks:
-- regional-domain-sizing:
-    parameters:
-      grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_ccs-12km/_grid.yml
-      test: true
-    output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_ccs-12km.ipynb
+  title: "Domain Sizing"
+  notebooks:
+    - regional-domain-sizing:
+        parameters:
+          domain_name: "CCS 12km"
+          grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_ccs-12km/_grid.yml
+          test: true
+        output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_ccs-12km.ipynb
 
-- regional-domain-sizing:
-    parameters:
-      grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_gulf-guinea-toy/_grid.yml
-      test: true
-    output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_gulf-guinea-toy.ipynb
+    - regional-domain-sizing:
+        parameters:
+          domain_name: "Gulf Guinea Toy"
+          grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_gulf-guinea-toy/_grid.yml
+          test: true
+        output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_gulf-guinea-toy.ipynb
 
-- regional-domain-sizing:
-    parameters:
-      grid_yaml: "cson_forge/blueprints/cson_roms-marbl_v0.1_hvalfj\xF6r\xF0ur-0/_grid.yml"
-      test: true
-    output_path: "executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_hvalfj\xF6\
-      r\xF0ur-0.ipynb"
+    - regional-domain-sizing:
+        parameters:
+          domain_name: "Hvalfjörður 0"
+          grid_yaml: "cson_forge/blueprints/cson_roms-marbl_v0.1_hvalfj\xF6r\xF0ur-0/_grid.yml"
+          test: true
+        output_path: "executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_hvalfj\xF6\
+          r\xF0ur-0.ipynb"
 
-- regional-domain-sizing:
-    parameters:
-      grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_test-tiny/_grid.yml
-      test: true
-    output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_test-tiny.ipynb
+    - regional-domain-sizing:
+        parameters:
+          domain_name: "Test Tiny"
+          grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_test-tiny/_grid.yml
+          test: true
+        output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_test-tiny.ipynb
 
-- regional-domain-sizing:
-    parameters:
-      grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_wio-toy/_grid.yml
-      test: true
-    output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_wio-toy.ipynb
+    - regional-domain-sizing:
+        parameters:
+          domain_name: "WIO Toy"
+          grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_wio-toy/_grid.yml
+          test: true
+        output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_wio-toy.ipynb
 
 

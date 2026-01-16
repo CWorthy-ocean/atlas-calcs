@@ -1,0 +1,1239 @@
+\section{Mapping the Extent of mCDR Signals within Finite Regional Domains}
+
+This notebook demonstrates how to map the extent of marine Carbon Dioxide Removal (mCDR) signals within finite regional domains. The analysis involves:
+
+\begin{enumerate}
+\item \textbf{Defining the regional model grid}: Creating a finite regional ocean model grid using ROMS tools
+\item \textbf{Loading the global atlas grid}: Using the POP ocean model grid as the base for the atlas dataset
+\item \textbf{Identifying overlapping polygons}: Finding which atlas polygons intersect with the regional domain
+\item \textbf{Integrating CO2 fluxes}: Computing cumulative CO2 uptake within the regional domain boundaries
+\item \textbf{Visualizing results}: Mapping the fraction of CO2 uptake captured within the regional domain
+\end{enumerate}
+
+The key challenge is determining what fraction of the global mCDR signal (from the atlas) is captured within a finite regional model domain, which is essential for understanding the efficiency and spatial extent of regional mCDR deployments.
+
+\subsection{Step 1: Import Required Libraries}
+
+Load the necessary Python packages for data manipulation, grid handling, and analysis utilities.
+
+\begin{verbatim}
+%load_ext autoreload
+%autoreload 2
+
+import numpy as np
+import xarray as xr
+
+import roms_tools as rt
+
+import cdr_atlas
+import parsers
+import utils
+\end{verbatim}
+
+\begin{verbatim}
+/Users/mclong/miniconda3/envs/atlas -calcs/lib/python3.13/site -packages/pop_tools/__init__.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025 -11 -30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import DistributionNotFound, get_distribution
+\end{verbatim}
+
+\begin{verbatim}
+grid_yaml = "tests/_grid.yml"
+test = True
+dask_cluster_kwargs = {
+    "account": "m4632",
+    "queue_name": "premium",
+    "scheduler_file": None,
+}
+\end{verbatim}
+
+\begin{verbatim}
+# Parameters
+grid_yaml = "cson_forge/blueprints/cson_roms -marbl_v0.1_wio -toy/_grid.yml"
+test = True
+dask_cluster_kwargs = {
+    "account": "m4632",
+    "queue_name": "premium",
+    "scheduler_file": None,
+}
+\end{verbatim}
+
+\subsection{Step 2: Define the Regional Model Grid}
+
+Create a finite regional ocean model grid using ROMS (Regional Ocean Modeling System) tools. This grid defines the spatial boundaries of our regional domain. The grid parameters include:
+
+\begin{itemize}
+\item \textbf{Grid dimensions}: number of grid points
+\item \textbf{Physical size}: domain extent
+\item \textbf{Center location}: geographic center
+\item \textbf{Rotation}: grid rotation angle
+\item \textbf{Vertical levels}: number of vertical sigma levels
+\end{itemize}
+
+The grid is plotted to visualize the regional domain extent.
+
+\begin{verbatim}
+model_grid = parsers.load_roms_tools_object(grid_yaml)
+model_grid.plot()
+\end{verbatim}
+
+\includegraphics[width=0.7\linewidth]{files/f7c49b7ce498afb09c48431e8bcb1deb.png}
+
+\subsection{Step 2: Load the Global Atlas Grid}
+
+Load the POP (Parallel Ocean Program) global ocean model grid (\texttt{POP\_gx1v7}), which serves as the base grid for the atlas dataset. This grid provides the spatial coordinates (TLAT, TLONG) and cell areas (TAREA) needed for area-weighted calculations.
+
+\begin{verbatim}
+atlas_grid = cdr_atlas.get_pop_grid()
+atlas_grid
+\end{verbatim}
+
+\begin{verbatim}
+<xarray.Dataset> Size: 11MB
+Dimensions:      (nlat: 384, nlon: 320, z_t: 60, z_w: 60, z_w_bot: 60, nreg: 13)
+Coordinates:
+  * z_t          (z_t) float64 480B 500.0 1.5e+03 ... 5.125e+05 5.375e+05
+  * z_w          (z_w) float64 480B 0.0 1e+03 2e+03 ... 4.75e+05 5e+05 5.25e+05
+  * z_w_bot      (z_w_bot) float64 480B 1e+03 2e+03 3e+03 ... 5.25e+05 5.5e+05
+  * nreg         (nreg) int64 104B 0 1 2 3 4 5 6 7 8 9 10 11 12
+Dimensions without coordinates: nlat, nlon
+Data variables: (12/15)
+    TLAT         (nlat, nlon) float64 983kB -79.22 -79.22 -79.22 ... 72.19 72.19
+    TLONG        (nlat, nlon) float64 983kB 320.6 321.7 322.8 ... 319.4 319.8
+    ULAT         (nlat, nlon) float64 983kB -78.95 -78.95 -78.95 ... 72.41 72.41
+    ULONG        (nlat, nlon) float64 983kB 321.1 322.3 323.4 ... 319.6 320.0
+    DXT          (nlat, nlon) float64 983kB 1.894e+06 1.893e+06 ... 1.473e+06
+    DYT          (nlat, nlon) float64 983kB 5.94e+06 5.94e+06 ... 5.046e+06
+    ...           ...
+    UAREA        (nlat, nlon) float64 983kB 1.423e+13 1.423e+13 ... 7.639e+12
+    KMT          (nlat, nlon) int32 492kB 0 0 0 0 0 0 0 0 0 ... 0 0 0 0 0 0 0 0
+    REGION_MASK  (nlat, nlon) int32 492kB 0 0 0 0 0 0 0 0 0 ... 0 0 0 0 0 0 0 0
+    dz           (z_t) float64 480B 1e+03 1e+03 1e+03 ... 2.5e+04 2.5e+04
+    region_name  (nreg) <U21 1kB 'Black Sea' 'Baltic Sea' ... 'Hudson Bay'
+    region_val   (nreg) int64 104B -13 -12 -5 1 2 3 4 6 7 8 9 10 11
+Attributes:
+    lateral_dims:       [384, 320]
+    vertical_dims:      60
+    vert_grid_file:     gx1v7_vert_grid
+    horiz_grid_fname:   inputdata/ocn/pop/gx1v7/grid/horiz_grid_20010402.ieeer8
+    topography_fname:   inputdata/ocn/pop/gx1v7/grid/topography_20161215.ieeei4
+    region_mask_fname:  inputdata/ocn/pop/gx1v7/grid/region_mask_20151008.ieeei4
+    type:               dipole
+    title:              POP_gx1v7 grid
+\end{verbatim}
+
+xarray.Dataset
+
+\begin{itemize}
+\item Dimensions:
+
+\begin{itemize}
+\item nlat: 384
+
+
+\item nlon: 320
+
+
+\item z\_t: 60
+
+
+\item z\_w: 60
+
+
+\item z\_w\_bot: 60
+
+
+\item nreg: 13
+\end{itemize}
+
+
+\item [x]Coordinates:
+
+(4)
+
+\begin{itemize}
+\item z\_t
+
+(z\_t)
+
+float64
+
+500.0 1.5e+03 ... 5.375e+05
+
+[ ][ ]
+
+\begin{itemize}
+\item units :cm
+
+
+\item long\_name :depth from surface to midpoint of layer
+
+
+\item positive :down
+\end{itemize}
+
+\begin{verbatim}
+array([5.000000e+02, 1.500000e+03, 2.500000e+03, 3.500000e+03, 4.500000e+03,
+       5.500000e+03, 6.500000e+03, 7.500000e+03, 8.500000e+03, 9.500000e+03,
+       1.050000e+04, 1.150000e+04, 1.250000e+04, 1.350000e+04, 1.450000e+04,
+       1.550000e+04, 1.650984e+04, 1.754790e+04, 1.862913e+04, 1.976603e+04,
+       2.097114e+04, 2.225783e+04, 2.364088e+04, 2.513702e+04, 2.676542e+04,
+       2.854837e+04, 3.051192e+04, 3.268680e+04, 3.510935e+04, 3.782276e+04,
+       4.087847e+04, 4.433777e+04, 4.827367e+04, 5.277280e+04, 5.793729e+04,
+       6.388626e+04, 7.075633e+04, 7.870025e+04, 8.788252e+04, 9.847059e+04,
+       1.106204e+05, 1.244567e+05, 1.400497e+05, 1.573946e+05, 1.764003e+05,
+       1.968944e+05, 2.186457e+05, 2.413972e+05, 2.649001e+05, 2.889385e+05,
+       3.133405e+05, 3.379794e+05, 3.627670e+05, 3.876452e+05, 4.125768e+05,
+       4.375393e+05, 4.625190e+05, 4.875083e+05, 5.125028e+05, 5.375000e+05])
+\end{verbatim}
+
+
+\item z\_w
+
+(z\_w)
+
+float64
+
+0.0 1e+03 2e+03 ... 5e+05 5.25e+05
+
+[ ][ ]
+
+\begin{itemize}
+\item units :cm
+
+
+\item positive :down
+
+
+\item long\_name :depth from surface to top of layer
+\end{itemize}
+
+\begin{verbatim}
+array([     0.    ,   1000.    ,   2000.    ,   3000.    ,   4000.    ,
+         5000.    ,   6000.    ,   7000.    ,   8000.    ,   9000.    ,
+        10000.    ,  11000.    ,  12000.    ,  13000.    ,  14000.    ,
+        15000.    ,  16000.    ,  17019.6808,  18076.1292,  19182.1243,
+        20349.9313,  21592.3446,  22923.3124,  24358.4534,  25915.5793,
+        27615.2589,  29481.4713,  31542.3736,  33831.2257,  36387.4728,
+        39258.0478,  42498.885 ,  46176.6575,  50370.6883,  55174.9119,
+        60699.6663,  67072.8582,  74439.803 ,  82960.6956,  92804.3538,
+       104136.8196, 117104.0188, 131809.3626, 148290.0716, 166499.2064,
+       186301.4408, 207487.3978, 229803.9076, 252990.4017, 276809.8509,
+       301067.0677, 325613.847 , 350344.8607, 375189.1888, 400101.1634,
+       425052.4544, 450026.0482, 475012.0091, 500004.6829, 525000.927 ])
+\end{verbatim}
+
+
+\item z\_w\_bot
+
+(z\_w\_bot)
+
+float64
+
+1e+03 2e+03 ... 5.25e+05 5.5e+05
+
+[ ][ ]
+
+\begin{itemize}
+\item units :cm
+
+
+\item positive :down
+
+
+\item long\_name :depth from surface to bottom of layer
+\end{itemize}
+
+\begin{verbatim}
+array([  1000.    ,   2000.    ,   3000.    ,   4000.    ,   5000.    ,
+         6000.    ,   7000.    ,   8000.    ,   9000.    ,  10000.    ,
+        11000.    ,  12000.    ,  13000.    ,  14000.    ,  15000.    ,
+        16000.    ,  17019.6808,  18076.1292,  19182.1243,  20349.9313,
+        21592.3446,  22923.3124,  24358.4534,  25915.5793,  27615.2589,
+        29481.4713,  31542.3736,  33831.2257,  36387.4728,  39258.0478,
+        42498.885 ,  46176.6575,  50370.6883,  55174.9119,  60699.6663,
+        67072.8582,  74439.803 ,  82960.6956,  92804.3538, 104136.8196,
+       117104.0188, 131809.3626, 148290.0716, 166499.2064, 186301.4408,
+       207487.3978, 229803.9076, 252990.4017, 276809.8509, 301067.0677,
+       325613.847 , 350344.8607, 375189.1888, 400101.1634, 425052.4544,
+       450026.0482, 475012.0091, 500004.6829, 525000.927 , 549999.0364])
+\end{verbatim}
+
+
+\item nreg
+
+(nreg)
+
+int64
+
+0 1 2 3 4 5 6 7 8 9 10 11 12
+
+[ ]
+
+\begin{verbatim}
+array([ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12])
+\end{verbatim}
+\end{itemize}
+
+
+\item [ ]Data variables:
+
+(15)
+
+\begin{itemize}
+\item TLAT
+
+(nlat, nlon)
+
+float64
+
+-79.22 -79.22 ... 72.19 72.19
+
+[ ][ ]
+
+\begin{itemize}
+\item units :degrees\_north
+
+
+\item long\_name :T-grid latitude
+\end{itemize}
+
+\begin{verbatim}
+array([[ -79.22052261, -79.22052261, -79.22052261, ..., -79.22052261,
+        -79.22052261, -79.22052261],
+       [ -78.68630626, -78.68630626, -78.68630626, ..., -78.68630626,
+        -78.68630626, -78.68630626],
+       [ -78.15208992, -78.15208992, -78.15208992, ..., -78.15208992,
+        -78.15208992, -78.15208992],
+       ...,
+       [ 71.29031715,  71.29408252,  71.30160692, ...,  71.30160692,
+         71.29408252,  71.29031716],
+       [ 71.73524335,  71.73881845,  71.74596231, ...,  71.74596231,
+         71.73881845,  71.73524335],
+       [ 72.18597561,  72.18933231,  72.19603941, ...,  72.19603941,
+         72.18933231,  72.18597562]], shape=(384, 320))
+\end{verbatim}
+
+
+\item TLONG
+
+(nlat, nlon)
+
+float64
+
+320.6 321.7 322.8 ... 319.4 319.8
+
+[ ][ ]
+
+\begin{itemize}
+\item units :degrees\_east
+
+
+\item long\_name :T-grid longitude
+\end{itemize}
+
+\begin{verbatim}
+array([[320.56250892, 321.68750895, 322.81250898, ..., 317.18750883,
+        318.31250886, 319.43750889],
+       [320.56250892, 321.68750895, 322.81250898, ..., 317.18750883,
+        318.31250886, 319.43750889],
+       [320.56250892, 321.68750895, 322.81250898, ..., 317.18750883,
+        318.31250886, 319.43750889],
+       ...,
+       [320.25133086, 320.75380113, 321.25577325, ..., 318.74424456,
+        319.24621668, 319.74869143],
+       [320.23459477, 320.70358949, 321.17207442, ..., 318.82794339,
+        319.29642832, 319.76542721],
+       [320.21650899, 320.6493303 , 321.08163473, ..., 318.91838308,
+        319.3506875 , 319.78351267]], shape=(384, 320))
+\end{verbatim}
+
+
+\item ULAT
+
+(nlat, nlon)
+
+float64
+
+-78.95 -78.95 ... 72.41 72.41
+
+[ ][ ]
+
+\begin{itemize}
+\item units :degrees\_north
+
+
+\item long\_name :U-grid latitude
+\end{itemize}
+
+\begin{verbatim}
+array([[ -78.95289509, -78.95289509, -78.95289509, ..., -78.95289509,
+        -78.95289509, -78.95289509],
+       [ -78.41865507, -78.41865507, -78.41865507, ..., -78.41865507,
+        -78.41865507, -78.41865507],
+       [ -77.88441506, -77.88441506, -77.88441506, ..., -77.88441506,
+        -77.88441506, -77.88441506],
+       ...,
+       [ 71.51215224,  71.51766482,  71.52684191, ...,  71.51766482,
+         71.51215224,  71.51031365],
+       [ 71.95983548,  71.96504258,  71.97371054, ...,  71.96504258,
+         71.95983548,  71.95809872],
+       [ 72.4135549 ,  72.41841155,  72.42649554, ...,  72.41841155,
+         72.4135549 ,  72.41193498]], shape=(384, 320))
+\end{verbatim}
+
+
+\item ULONG
+
+(nlat, nlon)
+
+float64
+
+321.1 322.3 323.4 ... 319.6 320.0
+
+[ ][ ]
+
+\begin{itemize}
+\item units :degrees\_east
+
+
+\item long\_name :U-grid longitude
+\end{itemize}
+
+\begin{verbatim}
+array([[321.12500894, 322.25000897, 323.375009  , ..., 317.75000884,
+        318.87500887, 320.0000089 ],
+       [321.12500894, 322.25000897, 323.375009  , ..., 317.75000884,
+        318.87500887, 320.0000089 ],
+       [321.12500894, 322.25000897, 323.375009  , ..., 317.75000884,
+        318.87500887, 320.0000089 ],
+       ...,
+       [320.48637802, 320.97240884, 321.4577638 , ..., 319.02760897,
+        319.51363979, 320.00001324],
+       [320.45160767, 320.90286181, 321.35342745, ..., 319.097156  ,
+        319.54841014, 320.00001293],
+       [320.41397858, 320.82760085, 321.24052915, ..., 319.17241696,
+        319.58603923, 320.00001259]], shape=(384, 320))
+\end{verbatim}
+
+
+\item DXT
+
+(nlat, nlon)
+
+float64
+
+1.894e+06 1.893e+06 ... 1.473e+06
+
+[ ][ ]
+
+\begin{itemize}
+\item units :cm
+
+
+\item long\_name :x-spacing centered at T points
+
+
+\item coordinates :TLONG TLAT
+\end{itemize}
+
+\begin{verbatim}
+array([[1893724.16734842, 1893489.06047211, 1893007.05572959, ...,
+        1893007.05572959, 1893489.06047211, 1893724.16734842],
+       [2453808.06658755, 2453808.06658755, 2453808.06658755, ...,
+        2453808.06658755, 2453808.06658755, 2453808.06658755],
+       [2568054.75706075, 2568054.75706075, 2568054.75706075, ...,
+        2568054.75706075, 2568054.75706075, 2568054.75706075],
+       ...,
+       [1792815.11513785, 1792270.53086782, 1791150.69791216, ...,
+        1791150.69791216, 1792270.53086782, 1792815.11513785],
+       [1635014.87507127, 1634497.02506524, 1633433.44903024, ...,
+        1633433.44903024, 1634497.02506524, 1635014.87507127],
+       [1472954.03210867, 1472467.18486634, 1471468.46623378, ...,
+        1471468.46623378, 1472467.18486634, 1472954.03210867]],
+      shape=(384, 320))
+\end{verbatim}
+
+
+\item DYT
+
+(nlat, nlon)
+
+float64
+
+5.94e+06 5.94e+06 ... 5.046e+06
+
+[ ][ ]
+
+\begin{itemize}
+\item units :cm
+
+
+\item long\_name :y-spacing centered at T points
+
+
+\item coordinates :TLONG TLAT
+\end{itemize}
+
+\begin{verbatim}
+array([[5939545.50164216, 5939545.50164216, 5939545.50164216, ...,
+        5939545.50164216, 5939545.50164216, 5939545.50164216],
+       [5939545.50164216, 5939545.50164216, 5939545.50164216, ...,
+        5939545.50164216, 5939545.50164216, 5939545.50164216],
+       [5939545.50164216, 5939545.50164216, 5939545.50164216, ...,
+        5939545.50164216, 5939545.50164216, 5939545.50164216],
+       ...,
+       [4916574.84890538, 4917288.98384521, 4918715.63970048, ...,
+        4918715.63970048, 4917288.98384521, 4916574.84890538],
+       [4978532.2566533 , 4979215.61944315, 4980580.74758446, ...,
+        4980580.74758446, 4979215.61944315, 4978532.2566533 ],
+       [5045798.85436364, 5046446.74588877, 5047740.96078377, ...,
+        5047740.96078377, 5046446.74588877, 5045798.85436364]],
+      shape=(384, 320))
+\end{verbatim}
+
+
+\item DXU
+
+(nlat, nlon)
+
+float64
+
+2.397e+06 2.397e+06 ... 1.391e+06
+
+[ ][ ]
+
+\begin{itemize}
+\item units :cm
+
+
+\item long\_name :x-spacing centered at U points
+
+
+\item coordinates :ULONG ULAT
+\end{itemize}
+
+\begin{verbatim}
+array([[2396630.14446974, 2396630.14446974, 2396630.14446974, ...,
+        2396630.14446974, 2396630.14446974, 2396630.14446974],
+       [2510985.98870535, 2510985.98870535, 2510985.98870535, ...,
+        2510985.98870535, 2510985.98870535, 2510985.98870535],
+       [2625123.52541615, 2625123.52541615, 2625123.52541615, ...,
+        2625123.52541615, 2625123.52541615, 2625123.52541615],
+       ...,
+       [1714673.76651229, 1713860.79472732, 1712495.20914674, ...,
+        1713860.79472732, 1714673.76651229, 1714939.8761523 ],
+       [1554838.13362422, 1554069.67936816, 1552779.42960208, ...,
+        1554069.67936816, 1554838.13362422, 1555089.87399024],
+       [1390583.0833508 , 1389865.97173196, 1388662.44323673, ...,
+        1389865.97173196, 1390583.0833508 , 1390818.1902271 ]],
+      shape=(384, 320))
+\end{verbatim}
+
+
+\item DYU
+
+(nlat, nlon)
+
+float64
+
+5.94e+06 5.94e+06 ... 5.493e+06
+
+[ ][ ]
+
+\begin{itemize}
+\item units :cm
+
+
+\item long\_name :y-spacing centered at U points
+
+
+\item coordinates :ULONG ULAT
+\end{itemize}
+
+\begin{verbatim}
+array([[5939545.50164216, 5939545.50164216, 5939545.50164216, ...,
+        5939545.50164216, 5939545.50164216, 5939545.50164216],
+       [5939545.50164216, 5939545.50164216, 5939545.50164216, ...,
+        5939545.50164216, 5939545.50164216, 5939545.50164216],
+       [5939545.50164216, 5939545.50164216, 5939545.50164216, ...,
+        5939545.50164216, 5939545.50164216, 5939545.50164216],
+       ...,
+       [4947728.34045104, 4948776.26283732, 4950520.12444762, ...,
+        4948776.26283732, 4947728.34045104, 4947378.76510764],
+       [5012332.0613836 , 5013330.30394832, 5014991.40441991, ...,
+        5013330.30394832, 5012332.0613836 , 5011999.04963334],
+       [5492753.21352024, 5493239.03401069, 5494047.42841524, ...,
+        5493239.03401069, 5492753.21352024, 5492591.14248556]],
+      shape=(384, 320))
+\end{verbatim}
+
+
+\item TAREA
+
+(nlat, nlon)
+
+float64
+
+1.125e+13 1.125e+13 ... 7.432e+12
+
+[ ][ ]
+
+\begin{itemize}
+\item units :cm\^2
+
+
+\item long\_name :area of T cells
+
+
+\item coordinates :TLONG TLAT
+\end{itemize}
+
+\begin{verbatim}
+array([[1.12478609e+13, 1.12464644e+13, 1.12436015e+13, ...,
+        1.12436015e+13, 1.12464644e+13, 1.12478609e+13],
+       [1.45745047e+13, 1.45745047e+13, 1.45745047e+13, ...,
+        1.45745047e+13, 1.45745047e+13, 1.45745047e+13],
+       [1.52530781e+13, 1.52530781e+13, 1.52530781e+13, ...,
+        1.52530781e+13, 1.52530781e+13, 1.52530781e+13],
+       ...,
+       [8.81450970e+12, 8.81311214e+12, 8.81016095e+12, ...,
+        8.81016095e+12, 8.81311214e+12, 8.81450970e+12],
+       [8.13997430e+12, 8.13851312e+12, 8.13544719e+12, ...,
+        8.13544719e+12, 8.13851312e+12, 8.13997430e+12],
+       [7.43222977e+12, 7.43072723e+12, 7.42759165e+12, ...,
+        7.42759165e+12, 7.43072723e+12, 7.43222977e+12]], shape=(384, 320))
+\end{verbatim}
+
+
+\item UAREA
+
+(nlat, nlon)
+
+float64
+
+1.423e+13 1.423e+13 ... 7.639e+12
+
+[ ][ ]
+
+\begin{itemize}
+\item units :cm\^2
+
+
+\item long\_name :area of U cells
+
+
+\item coordinates :ULONG ULAT
+\end{itemize}
+
+\begin{verbatim}
+array([[1.42348938e+13, 1.42348938e+13, 1.42348938e+13, ...,
+        1.42348938e+13, 1.42348938e+13, 1.42348938e+13],
+       [1.49141155e+13, 1.49141155e+13, 1.49141155e+13, ...,
+        1.49141155e+13, 1.49141155e+13, 1.49141155e+13],
+       [1.55920406e+13, 1.55920406e+13, 1.55920406e+13, ...,
+        1.55920406e+13, 1.55920406e+13, 1.55920406e+13],
+       ...,
+       [8.48373999e+12, 8.48151362e+12, 8.47774200e+12, ...,
+        8.48151362e+12, 8.48373999e+12, 8.48445713e+12],
+       [7.79336503e+12, 7.79106462e+12, 7.78717549e+12, ...,
+        7.79106462e+12, 7.79336503e+12, 7.79410897e+12],
+       [7.63812970e+12, 7.63486601e+12, 7.62937733e+12, ...,
+        7.63486601e+12, 7.63812970e+12, 7.63919567e+12]], shape=(384, 320))
+\end{verbatim}
+
+
+\item KMT
+
+(nlat, nlon)
+
+int32
+
+0 0 0 0 0 0 0 0 ... 0 0 0 0 0 0 0 0
+
+[ ][ ]
+
+\begin{itemize}
+\item long\_name :k Index of Deepest Grid Cell on T Grid
+
+
+\item coordinates :TLONG TLAT
+\end{itemize}
+
+\begin{verbatim}
+array([[ 0,  0,  0, ...,  0,  0,  0],
+       [ 0,  0,  0, ...,  0,  0,  0],
+       [38, 38, 38, ...,  0,  0,  0],
+       ...,
+       [ 0,  0,  0, ...,  0,  0,  0],
+       [ 0,  0,  0, ...,  0,  0,  0],
+       [ 0,  0,  0, ...,  0,  0,  0]], shape=(384, 320), dtype=int32)
+\end{verbatim}
+
+
+\item REGION\_MASK
+
+(nlat, nlon)
+
+int32
+
+0 0 0 0 0 0 0 0 ... 0 0 0 0 0 0 0 0
+
+[ ][ ]
+
+\begin{itemize}
+\item long\_name :basin index number (signed integers)
+
+
+\item coordinates :TLONG TLAT
+\end{itemize}
+
+\begin{verbatim}
+array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [1, 1, 1, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(384, 320), dtype=int32)
+\end{verbatim}
+
+
+\item dz
+
+(z\_t)
+
+float64
+
+1e+03 1e+03 ... 2.5e+04 2.5e+04
+
+[ ][ ]
+
+\begin{itemize}
+\item units :cm
+
+
+\item long\_name :thickness of layer k
+\end{itemize}
+
+\begin{verbatim}
+array([ 1000.    ,  1000.    ,  1000.    ,  1000.    ,  1000.    ,
+        1000.    ,  1000.    ,  1000.    ,  1000.    ,  1000.    ,
+        1000.    ,  1000.    ,  1000.    ,  1000.    ,  1000.    ,
+        1000.    ,  1019.6808,  1056.4484,  1105.9951,  1167.807 ,
+        1242.4133,  1330.9678,  1435.141 ,  1557.1259,  1699.6796,
+        1866.2124,  2060.9023,  2288.8521,  2556.2471,  2870.575 ,
+        3240.8372,  3677.7725,  4194.0308,  4804.2236,  5524.7544,
+        6373.1919,  7366.9448,  8520.8926,  9843.6582, 11332.4658,
+       12967.1992, 14705.3438, 16480.709 , 18209.1348, 19802.2344,
+       21185.957 , 22316.5098, 23186.4941, 23819.4492, 24257.2168,
+       24546.7793, 24731.0137, 24844.3281, 24911.9746, 24951.291 ,
+       24973.5938, 24985.9609, 24992.6738, 24996.2441, 24998.1094])
+\end{verbatim}
+
+
+\item region\_name
+
+(nreg)
+
+\textless U21
+
+'Black Sea' ... 'Hudson Bay'
+
+[ ]
+
+\begin{verbatim}
+array(['Black Sea', 'Baltic Sea', 'Red Sea', 'Southern Ocean',
+       'Pacific Ocean', 'Indian Ocean', 'Persian Gulf', 'Atlantic Ocean',
+       'Mediterranean Sea', 'Lab. Sea & Baffin Bay', 'GIN Seas',
+       'Arctic Ocean', 'Hudson Bay'], dtype='<U21')
+\end{verbatim}
+
+
+\item region\_val
+
+(nreg)
+
+int64
+
+-13 -12 -5 1 2 3 4 6 7 8 9 10 11
+
+[ ][ ]
+
+\begin{itemize}
+\item coordinate :region\_name
+\end{itemize}
+
+\begin{verbatim}
+array([ -13, -12,  -5,   1,   2,   3,   4,   6,   7,   8,   9,  10,  11])
+\end{verbatim}
+\end{itemize}
+
+
+\item [ ]Indexes:
+
+(4)
+
+\begin{itemize}
+\item z\_t
+
+PandasIndex
+
+[ ]
+
+\begin{verbatim}
+PandasIndex(Index([             500.0,             1500.0,             2500.0,
+                   3500.0,             4500.0,             5500.0,
+                   6500.0,             7500.0,             8500.0,
+                   9500.0,            10500.0,            11500.0,
+                  12500.0,            13500.0,            14500.0,
+                  15500.0,         16509.8404,          17547.905,
+              18629.12675,         19766.0278,        20971.13795,
+               22257.8285,         23640.8829, 25137.016349999998,
+               26765.4191, 28548.365099999995,        30511.92245,
+              32686.79965,  35109.34924999999, 37822.760299999994,
+        40878.46639999999,        44337.77125,  48273.67289999999,
+        52772.80009999999, 57937.289099999995,  63886.26224999999,
+        70756.33059999999,  78700.24929999998,  87882.52469999998,
+        98470.58669999999, 110620.41919999999, 124456.69069999999,
+       140049.71709999998,         157394.639,        176400.3236,
+       196894.41929999998, 218645.65269999998, 241397.15464999998,
+              264900.1263,        288938.4593,       313340.45735,
+       337979.35384999996,       362767.02475,  387645.1760999999,
+       412576.80889999995,        437539.2513, 462519.02864999993,
+       487508.34599999996, 512502.80494999996,  537499.9816999999],
+      dtype='float64', name='z_t'))
+\end{verbatim}
+
+
+\item z\_w
+
+PandasIndex
+
+[ ]
+
+\begin{verbatim}
+PandasIndex(Index([               0.0,             1000.0,             2000.0,
+                   3000.0,             4000.0,             5000.0,
+                   6000.0,             7000.0,             8000.0,
+                   9000.0,            10000.0,            11000.0,
+                  12000.0,            13000.0,            14000.0,
+                  15000.0,            16000.0,         17019.6808,
+               18076.1292,         19182.1243,         20349.9313,
+               21592.3446,         22923.3124,         24358.4534,
+       25915.579299999998, 27615.258899999997, 29481.471299999997,
+               31542.3736, 33831.225699999995, 36387.472799999996,
+        39258.04779999999, 42498.884999999995, 46176.657499999994,
+       50370.688299999994,  55174.91189999999,  60699.66629999999,
+        67072.85819999999,  74439.80299999999,  82960.69559999998,
+        92804.35379999998, 104136.81959999999, 117104.01879999999,
+              131809.3626,        148290.0716,        166499.2064,
+       186301.44079999998, 207487.39779999998, 229803.90759999998,
+              252990.4017, 276809.85089999996, 301067.06769999996,
+       325613.84699999995, 350344.86069999996, 375189.18879999995,
+       400101.16339999996,        425052.4544, 450026.04819999996,
+       475012.00909999997, 500004.68289999996,  525000.9269999999],
+      dtype='float64', name='z_w'))
+\end{verbatim}
+
+
+\item z\_w\_bot
+
+PandasIndex
+
+[ ]
+
+\begin{verbatim}
+PandasIndex(Index([            1000.0,             2000.0,             3000.0,
+                   4000.0,             5000.0,             6000.0,
+                   7000.0,             8000.0,             9000.0,
+                  10000.0,            11000.0,            12000.0,
+                  13000.0,            14000.0,            15000.0,
+                  16000.0,         17019.6808,         18076.1292,
+               19182.1243,         20349.9313,         21592.3446,
+               22923.3124,         24358.4534, 25915.579299999998,
+       27615.258899999997, 29481.471299999997,         31542.3736,
+       33831.225699999995, 36387.472799999996,  39258.04779999999,
+       42498.884999999995, 46176.657499999994, 50370.688299999994,
+        55174.91189999999,  60699.66629999999,  67072.85819999999,
+        74439.80299999999,  82960.69559999998,  92804.35379999998,
+       104136.81959999999, 117104.01879999999,        131809.3626,
+              148290.0716,        166499.2064, 186301.44079999998,
+       207487.39779999998, 229803.90759999998,        252990.4017,
+       276809.85089999996, 301067.06769999996, 325613.84699999995,
+       350344.86069999996, 375189.18879999995, 400101.16339999996,
+              425052.4544, 450026.04819999996, 475012.00909999997,
+       500004.68289999996,  525000.9269999999,  549999.0363999999],
+      dtype='float64', name='z_w_bot'))
+\end{verbatim}
+
+
+\item nreg
+
+PandasIndex
+
+[ ]
+
+\begin{verbatim}
+PandasIndex(Index([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dtype='int64', name='nreg'))
+\end{verbatim}
+\end{itemize}
+
+
+\item [x]Attributes:
+
+(8)
+
+\begin{itemize}
+\item lateral\_dims :[384, 320]
+
+
+\item vertical\_dims :60
+
+
+\item vert\_grid\_file :gx1v7\_vert\_grid
+
+
+\item horiz\_grid\_fname :inputdata/ocn/pop/gx1v7/grid/horiz\_grid\_20010402.ieeer8
+
+
+\item topography\_fname :inputdata/ocn/pop/gx1v7/grid/topography\_20161215.ieeei4
+
+
+\item region\_mask\_fname :inputdata/ocn/pop/gx1v7/grid/region\_mask\_20151008.ieeei4
+
+
+\item type :dipole
+
+
+\item title :POP\_gx1v7 grid
+\end{itemize}
+\end{itemize}
+
+\subsection{Step 4: Load Polygon Masks}
+
+Load the polygon masks from the atlas dataset. Each polygon represents a distinct mCDR injection location. The polygon IDs are masked to only include ocean points (where \texttt{KMT \textgreater  0}, indicating valid ocean grid cells).
+
+\begin{verbatim}
+ds_atlas_polygons = cdr_atlas.get_polygon_masks_dataset()
+polygon_ids = ds_atlas_polygons.polygon_id.where(atlas_grid.KMT > 0)
+polygon_ids.plot()
+\end{verbatim}
+
+\begin{verbatim}
+<matplotlib.collections.QuadMesh at 0x33c603750>
+\end{verbatim}
+
+\includegraphics[width=0.7\linewidth]{files/55861ee523c4fdcb634b9f71bd9b7e35.png}
+
+\subsection{Step 5: Create Analyzer and Identify Overlapping Polygons}
+
+Initialize the \texttt{AtlasModelGridAnalyzer} class, which:
+
+\begin{enumerate}
+\item \textbf{Computes the convex hull} of the regional model grid using all lat/lon points from \texttt{model\_grid.ds.lat\_u} and \texttt{lon\_u}
+\item \textbf{Performs point-in-polygon tests} to identify which atlas grid points fall within the regional domain boundaries
+\item \textbf{Extracts unique polygon IDs} that have at least some overlap with the regional domain
+\item \textbf{Creates a polygon ID mask} where polygon IDs are set to -1 outside the regional domain
+\end{enumerate}
+
+The analyzer uses a convex hull approach (rather than a simple bounding box) to accurately handle non-rectangular regional domains. The resulting mask shows which polygons intersect with the regional domain.p
+
+\begin{verbatim}
+# Create AtlasModelGridAnalyzer instance
+analyzer = cdr_atlas.AtlasModelGridAnalyzer(model_grid, atlas_grid, polygon_ids=polygon_ids)
+
+# Get polygon IDs within model grid boundaries
+print(f"Found {len(analyzer.polygon_ids_in_bounds)} unique polygon IDs within model grid boundaries")
+print(f"Polygon IDs: {analyzer.polygon_ids_in_bounds[:100]}..." if len(analyzer.polygon_ids_in_bounds) > 100 else f"Polygon IDs: {analyzer.polygon_ids_in_bounds}")
+
+analyzer.polygon_id_mask.plot(vmin= -1, vmax=analyzer.polygon_id_mask.max())
+\end{verbatim}
+
+\begin{verbatim}
+Found 80 unique polygon IDs within model grid boundaries
+Polygon IDs: [  0. 352. 354. 360. 361. 365. 366. 372. 375. 376. 379. 381. 382. 389.
+ 390. 393. 400. 402. 403. 407. 408. 409. 412. 419. 428. 431. 436. 437.
+ 438. 442. 444. 447. 452. 457. 461. 463. 465. 466. 468. 475. 477. 484.
+ 492. 495. 501. 505. 506. 515. 517. 519. 522. 524. 528. 536. 538. 548.
+ 552. 553. 554. 560. 562. 570. 577. 578. 582. 587. 588. 592. 599. 601.
+ 602. 603. 605. 611. 613. 618. 622. 624. 638. 639.]
+\end{verbatim}
+
+\begin{verbatim}
+<matplotlib.collections.QuadMesh at 0x33c6c2210>
+\end{verbatim}
+
+\includegraphics[width=0.7\linewidth]{files/0011a9f62d2d812035acadaf12138503.png}
+
+\subsection{Step 6: Test: Integrate CO\textsubscript{2} Flux for a Single Polygon}
+
+Compute the cumulative CO2 uptake for a single polygon over a 3-month period. The integration:
+
+\begin{enumerate}
+\item \textbf{Retrieves alk-forcing files} from S3 (with local caching) for the specified polygon, injection date, and time period
+\item \textbf{Calculates the additional CO2 flux} (\texttt{FG\_CO2\_additional = FG\_CO2 - FG\_ALT\_CO2}) which represents the mCDR signal
+\item \textbf{Integrates over space and time} using:
+
+\begin{itemize}
+\item Area weighting with \texttt{TAREA} (grid cell areas)
+\item Time weighting with days per month converted to seconds
+\item Spatial masking to restrict to points within the regional domain
+\end{itemize}
+
+
+\item \textbf{Computes cumulative integrals} over the elapsed time dimension
+\end{enumerate}
+
+The results show:
+
+\begin{itemize}
+\item \textbf{Total integrated FG\_CO2}: Total CO2 uptake over the entire polygon extent
+\item \textbf{Within model grid}: CO2 uptake within the regional domain boundaries
+\item \textbf{Fraction within grid}: Percentage of total uptake captured by the regional domain
+\end{itemize}
+
+\begin{verbatim}
+years = [347+i for i in range(15)]
+years
+\end{verbatim}
+
+\begin{verbatim}
+[347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361]
+\end{verbatim}
+
+\begin{verbatim}
+cluster = utils.dask_cluster(**dask_cluster_kwargs)
+cluster
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - To route to workers diagnostics web server please install jupyter -server -proxy: python -m pip install jupyter -server -proxy
+\end{verbatim}
+
+\begin{verbatim}
+/Users/mclong/miniconda3/envs/atlas -calcs/lib/python3.13/site -packages/distributed/node.py:188: UserWarning: Port 8787 is already in use.
+Perhaps you already have a cluster running?
+Hosting the HTTP server on port 59916 instead
+  warnings.warn(
+2026 -01 -15 20:27:01 - INFO - State start
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO -   Scheduler at:     tcp://127.0.0.1:59917
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO -   dashboard at:  http://127.0.0.1:59916/status
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Registering Worker plugin shuffle
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO -         Start Nanny at: 'tcp://127.0.0.1:59920'
+\end{verbatim}
+
+\begin{verbatim}
+Numba: Attempted to fork from a non -main thread, the TBB library may be in an invalid state in the child process.
+2026 -01 -15 20:27:01 - INFO -         Start Nanny at: 'tcp://127.0.0.1:59922'
+\end{verbatim}
+
+\begin{verbatim}
+Numba: Attempted to fork from a non -main thread, the TBB library may be in an invalid state in the child process.
+2026 -01 -15 20:27:01 - INFO -         Start Nanny at: 'tcp://127.0.0.1:59924'
+\end{verbatim}
+
+\begin{verbatim}
+Numba: Attempted to fork from a non -main thread, the TBB library may be in an invalid state in the child process.
+2026 -01 -15 20:27:01 - INFO -         Start Nanny at: 'tcp://127.0.0.1:59926'
+\end{verbatim}
+
+\begin{verbatim}
+Numba: Attempted to fork from a non -main thread, the TBB library may be in an invalid state in the child process.
+\end{verbatim}
+
+\begin{verbatim}
+Numba: Attempted to fork from a non -main thread, the TBB library may be in an invalid state in the child process.
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Register worker addr: tcp://127.0.0.1:59928 name: 2
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Starting worker compute stream, tcp://127.0.0.1:59928
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Starting established connection to tcp://127.0.0.1:59939
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Register worker addr: tcp://127.0.0.1:59930 name: 0
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Starting worker compute stream, tcp://127.0.0.1:59930
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Starting established connection to tcp://127.0.0.1:59936
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Register worker addr: tcp://127.0.0.1:59931 name: 1
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Starting worker compute stream, tcp://127.0.0.1:59931
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Starting established connection to tcp://127.0.0.1:59938
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Register worker addr: tcp://127.0.0.1:59929 name: 3
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Starting worker compute stream, tcp://127.0.0.1:59929
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Starting established connection to tcp://127.0.0.1:59937
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Receive client connection: Client -38f26ec8 -f28b -11f0 -83e8 -26da8a241958
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:01 - INFO - Starting established connection to tcp://127.0.0.1:59941
+\end{verbatim}
+
+\begin{verbatim}
+Local cluster running at http://127.0.0.1:59916/status
+\end{verbatim}
+
+\begin{verbatim}
+<utils.dask_cluster at 0x33a75e510>
+\end{verbatim}
+
+\begin{verbatim}
+%%time
+# Integrate FG_CO2 for polygon 000 over 3 months
+# Using the alk -forcing files: 0347 -01, 0347 -02, 0347 -03
+results = analyzer.integrate_fg_co2_polygon(
+    polygon_id=analyzer.polygon_ids_in_bounds[ -1],
+    years=years[ -2: -1],
+    months=[1, 2, 3],
+)
+
+print("FG_CO2 Integration Results:")
+print(f"  Total integrated FG_CO2: {results['total'].values[ -1]:.2e}")
+print(f"  Within model grid: {results['within_grid'].values[ -1]:.2e}")
+print(f"  Fraction within grid: {results['fraction'].values[ -1]:.2%}")
+\end{verbatim}
+
+\begin{verbatim}
+Using cached files for all 3 requested file(s).
+\end{verbatim}
+
+\begin{verbatim}
+FG_CO2 Integration Results:
+  Total integrated FG_CO2: 4.15e+08
+  Within model grid: 2.14e+08
+  Fraction within grid: 51.45%
+CPU times: user 300 ms, sys: 75.3 ms, total: 375 ms
+Wall time: 2.89 s
+\end{verbatim}
+
+\subsection{Step 7: Integrate CO\textsubscript{2} Flux for All Overlapping Polygons}
+
+Compute the cumulative CO2 uptake for all polygons that intersect with the regional domain. This provides a comprehensive view of how much of the global mCDR signal is captured within the finite regional domain. The results are concatenated along the \texttt{polygon\_id} dimension, creating a dataset with dimensions \texttt{(polygon\_id, elapsed\_time)}.
+
+\begin{verbatim}
+%%time
+ds = None
+if not test:
+    ds = analyzer.integrate_fg_co2_all_polygons(
+        years=years,
+    )   
+ds
+\end{verbatim}
+
+\begin{verbatim}
+CPU times: user 8 \mus, sys: 1 \mus, total: 9 \mus
+Wall time: 11 \mus
+\end{verbatim}
+
+\subsection{Step 8: Visualize Fraction of Uptake within Regional Domain}
+
+Map the fraction of CO2 uptake captured within the regional domain for each polygon. The visualization shows:
+
+\begin{itemize}
+\item \textbf{Red regions}: Polygons where a large fraction of CO2 uptake occurs within the regional domain
+\item \textbf{Blue regions}: Polygons where most CO2 uptake occurs outside the regional domain
+\end{itemize}
+
+This spatial map helps identify which mCDR injection locations are most effectively captured by the regional model domain, which is critical for understanding the efficiency of regional mCDR monitoring and modeling efforts.
+
+\begin{verbatim}
+if ds is not None:
+    analyzer.set_field_within_boundaries(ds.fraction.isel(elapsed_time= -1)).plot(cmap="RdBu_r")
+\end{verbatim}
+
+\begin{verbatim}
+# check if LocalCluster is running and shutdown
+if cluster.local_cluster:
+    cluster.shutdown()
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:04 - INFO - Closing Nanny at 'tcp://127.0.0.1:59920'. Reason: nanny -close
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:04 - INFO - Nanny asking worker to close. Reason: nanny -close
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:04 - INFO - Closing Nanny at 'tcp://127.0.0.1:59922'. Reason: nanny -close
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:04 - INFO - Nanny asking worker to close. Reason: nanny -close
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:04 - INFO - Closing Nanny at 'tcp://127.0.0.1:59924'. Reason: nanny -close
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:04 - INFO - Nanny asking worker to close. Reason: nanny -close
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:04 - INFO - Closing Nanny at 'tcp://127.0.0.1:59926'. Reason: nanny -close
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:04 - INFO - Nanny asking worker to close. Reason: nanny -close
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:05 - INFO - Nanny at 'tcp://127.0.0.1:59922' closed.
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:05 - INFO - Nanny at 'tcp://127.0.0.1:59926' closed.
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:05 - INFO - Nanny at 'tcp://127.0.0.1:59924' closed.
+\end{verbatim}
+
+\begin{verbatim}
+2026 -01 -15 20:27:05 - INFO - Nanny at 'tcp://127.0.0.1:59920' closed.
+\end{verbatim}

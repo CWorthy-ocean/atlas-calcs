@@ -23,7 +23,7 @@ dependencies:
   - ipywidgets
   - gdown
   - jupyterlab
-  - jupyter-book
+  - jupyter-book>2
   - mamba
   - matplotlib
   - mpich

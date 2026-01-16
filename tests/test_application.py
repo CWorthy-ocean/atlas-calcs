@@ -39,6 +39,8 @@ def test_load_yaml_params_multiple_documents(tmp_path):
 
 
 def test_run_notebook_calls_papermill(monkeypatch, tmp_path):
+    import nbformat
+
     calls = []
 
     def fake_execute_notebook(input_path, output_path, parameters, kernel_name=None):
@@ -49,24 +51,32 @@ def test_run_notebook_calls_papermill(monkeypatch, tmp_path):
         "papermill",
         SimpleNamespace(execute_notebook=fake_execute_notebook),
     )
+    notebook_path = tmp_path / "a.ipynb"
+    nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_markdown_cell("No template")])
+    nbformat.write(nb, str(notebook_path))
     output_dir = tmp_path / "executed"
     output_path = output_dir / "a.ipynb"
     params = {"nx": 10}
 
     application.run_notebook(
-        tmp_path / "a.ipynb",
+        notebook_path,
         output_path=output_path,
         parameters=params,
     )
 
     assert output_dir.exists()
     assert calls == [
-        (str(tmp_path / "a.ipynb"), str(output_path), params, "atlas-calcs"),
+        (str(notebook_path), str(output_path), params, "atlas-calcs"),
     ]
 
 
 def test_run_notebook_requires_papermill(monkeypatch, tmp_path):
     import builtins
+    import nbformat
+
+    notebook_path = tmp_path / "a.ipynb"
+    nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_markdown_cell("No template")])
+    nbformat.write(nb, str(notebook_path))
 
     original_import = builtins.__import__
 
@@ -77,7 +87,40 @@ def test_run_notebook_requires_papermill(monkeypatch, tmp_path):
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(RuntimeError, match="papermill is required"):
-        application.run_notebook(tmp_path / "a.ipynb", tmp_path / "out.ipynb", {})
+        application.run_notebook(notebook_path, tmp_path / "out.ipynb", {})
+
+
+def test_run_notebook_replaces_markdown_placeholders(monkeypatch, tmp_path):
+    import nbformat
+
+    notebook_path = tmp_path / "template.ipynb"
+    nb = nbformat.v4.new_notebook(
+        cells=[
+            nbformat.v4.new_markdown_cell("Grid: {{ grid_yaml }}"),
+            nbformat.v4.new_code_cell("print('ok')"),
+        ]
+    )
+    nbformat.write(nb, str(notebook_path))
+    output_path = tmp_path / "executed.ipynb"
+    params = {"grid_yaml": "tests/_grid.yml"}
+
+    captured = {}
+
+    def fake_execute_notebook(input_path, output_path_arg, parameters, kernel_name=None):
+        rendered = nbformat.read(input_path, as_version=4)
+        captured["input_path"] = input_path
+        captured["markdown"] = rendered.cells[0]["source"]
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "papermill",
+        SimpleNamespace(execute_notebook=fake_execute_notebook),
+    )
+
+    application.run_notebook(notebook_path, output_path, params)
+
+    assert captured["input_path"] != str(notebook_path)
+    assert captured["markdown"] == "Grid: tests/_grid.yml"
 
 
 def test_normalize_file_type():
@@ -177,7 +220,7 @@ def test_notebook_list_model():
         notebook_name="regional-domain-sizing",
         config=config,
     )
-    notebook_list = parsers.NotebookList(notebooks=[entry])
+    notebook_list = parsers.NotebookList(title="Test", notebooks=[entry])
     assert notebook_list.notebooks[0].notebook_name == "regional-domain-sizing"
 
 
@@ -190,7 +233,7 @@ def test_parameters_config_model():
         notebook_name="regional-domain-sizing",
         config=config,
     )
-    notebook_list = parsers.NotebookList(notebooks=[entry])
+    notebook_list = parsers.NotebookList(title="Test", notebooks=[entry])
     dask_kwargs = parsers.DaskClusterKwargs(
         account="m4632",
         queue_name="premium",
@@ -215,6 +258,8 @@ def test_load_app_config(tmp_path):
                 "  scheduler_file: null",
                 "",
                 "notebooks:",
+                "  title: Test",
+                "  notebooks:",
                 "- regional-domain-sizing:",
                 "    parameters:",
                 "      grid_yaml: tests/_grid.yml",
@@ -260,7 +305,7 @@ def test_load_app_config_requires_notebooks(tmp_path):
 
 def test_parse_notebook_entries_requires_list():
     with pytest.raises(ValueError, match="notebooks must be a list"):
-        parsers._parse_notebook_entries({"bad": "data"}, base_dir=Path("."))
+        parsers._parse_notebook_entries({"title": "Bad"}, base_dir=Path("."))
 
 
 def test_parse_notebook_entries_requires_single_key():
@@ -296,11 +341,13 @@ def test_main_cli_uses_yaml_file(monkeypatch, tmp_path):
         "\n".join(
             [
                 "notebooks:",
-                "- regional-domain-sizing:",
-                "    parameters:",
-                "      grid_yaml: tests/_grid.yml",
-                "      test: true",
-                "    output_path: executed/domain-sizing/example.ipynb",
+                "  title: Test",
+                "  notebooks:",
+                "  - regional-domain-sizing:",
+                "      parameters:",
+                "        grid_yaml: tests/_grid.yml",
+                "        test: true",
+                "      output_path: executed/domain-sizing/example.ipynb",
                 "",
             ]
         ),

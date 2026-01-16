@@ -49,6 +49,7 @@ class dask_cluster(object):
             Existing scheduler file to connect to. If provided, skip launch.
         """
         self.scheduler_file = scheduler_file
+        self.client = None
         
         if not slurm_available():
             self.cluster = LocalCluster()
@@ -81,7 +82,7 @@ class dask_cluster(object):
             "link"
         ] = "{JUPYTERHUB_SERVICE_PREFIX}proxy/{host}:{port}/status"
         
-        self.client = Client(scheduler_file=self.scheduler_file)
+        self._connect_client()
         self.dashboard_link = f"{JUPYTERHUB_URL}/{self.client.dashboard_link}"
 
 
@@ -185,13 +186,37 @@ class dask_cluster(object):
 
         return scheduler_file, jobid
 
+    def _connect_client(self, timeout=60, retries=12, delay=5):
+        """Connect to an existing scheduler with retries."""
+        last_exc = None
+        for _ in range(retries):
+            try:
+                self.client = Client(scheduler_file=self.scheduler_file, timeout=timeout)
+                return
+            except Exception as exc:
+                last_exc = exc
+                time.sleep(delay)
+        raise RuntimeError(
+            f"Failed to connect to scheduler after {retries} attempts: {self.scheduler_file}"
+        ) from last_exc
+
     def shutdown(self):
         """Shutdown the Dask client and any launched cluster resources."""
-        self.client.shutdown()
+        if self.client is not None:
+            try:
+                self.client.shutdown()
+            except Exception:
+                pass
         if self.jobid:
-            check_call(f"scancel {self.jobid}", shell=True)
+            try:
+                check_call(f"scancel {self.jobid}", shell=True)
+            except Exception:
+                pass
         if getattr(self, "cluster", None) is not None:
-            self.cluster.close()
+            try:
+                self.cluster.close()
+            except Exception:
+                pass
 
 
 def slurm_available() -> bool:
