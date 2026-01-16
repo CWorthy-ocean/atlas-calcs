@@ -1,0 +1,14 @@
+ccs:
+  nx: 224
+  ny: 440
+  size_x: 2688
+  size_y: 5280
+  center_lon: -134.5
+  center_lat: 39.6
+  rot: 33.3
+  N: 100
+  hc: 250
+  theta_s: 6.0
+  theta_b: 6.0
+  verbose: true
+  hmin: 5.0

@@ -10,37 +10,56 @@ This module provides functions and classes for:
 # Standard library imports
 import os
 from pathlib import Path
-from subprocess import check_output, check_call
 
-import tempfile
 import time
-import textwrap
 
 import numpy as np
 import s3fs
 
 import xarray as xr
-import dask
-from dask.distributed import Client
+import pop_tools
 
 from shapely.geometry import MultiPoint, Point
 from shapely.prepared import prep
 
-
+import paths
 
 # Module-level constants
 USER = os.environ["USER"]
+SCRATCH = paths.scratch
 
-JUPYTERHUB_URL = "https://jupyter.nersc.gov"
-
-SCRATCH = Path(os.environ.get("SCRATCH", Path(os.environ.get("HOME")) / "scratch"))
 CACHE_DIR = SCRATCH / "atlas_cache"
-
 S3_BASE_URL = "s3://us-west-2.opendata.source.coop/cworthy/oae-efficiency-atlas/data"
+
 DAYS_PER_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 # Initialize cache directory
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+def get_pop_grid(force_download: bool = False) -> xr.Dataset:
+    """
+    Return the POP grid dataset, downloading and caching if needed.
+    """
+    return pop_tools.get_grid(grid_name="POP_gx1v7")
+    
+
+def get_polygon_masks_dataset(force_download: bool = False) -> xr.Dataset:
+    """
+    Return the polygon masks dataset, downloading and caching if needed.
+
+    Parameters
+    ----------
+    force_download : bool, optional
+        If True, re-download even if cached. Default is False.
+    """
+    polygon_masks_url = f"{S3_BASE_URL}/polygon_masks.nc"
+    polygon_masks_cache_path = CACHE_DIR / "polygon_masks.nc"
+    if force_download or not polygon_masks_cache_path.exists():
+        polygon_masks_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        fs = s3fs.S3FileSystem(anon=True)
+        fs.get(polygon_masks_url, str(polygon_masks_cache_path))
+    return xr.open_dataset(polygon_masks_cache_path)
+
 
 
 def points_within_grid_boundaries(model_grid, points_lat, points_lon):
@@ -290,17 +309,15 @@ def read_alk_forcing_files(polygon_id, injection_year, injection_month, years, m
             )
         files.append(str(cache_path))
     
-    # Open and combine datasets
-    # Use compat='override' to skip coordinate checking for faster loading
-    # parallel=True enables parallel file opening (if backend supports it)
-    # data_vars='minimal' reduces data loading overhead
     return xr.open_mfdataset(
-        files, 
-        decode_timedelta=True, 
-        compat='override', 
-        coords='minimal',
-        data_vars='minimal',
-        parallel=True
+        files,
+        decode_timedelta=True,
+        compat="override",
+        coords="minimal",
+        data_vars="minimal",
+        parallel=True,
+        chunks={},
+        engine="h5netcdf",
     )
 
 
@@ -456,90 +473,73 @@ class AtlasModelGridAnalyzer:
         
         # Print plan before starting
         injection_date = f"{injection_year:04d}-{injection_month:02d}"
-        print(f"Plan for polygon_id={polygon_id}, injection_date={injection_date}, years={years}, months={months}:")
-        print("  1. Read alk-forcing files")
-        print("  2. Verify FG_CO2 variables")
-        print("  3. Create time delta array")
-        print("  4. Get TAREA and boundary mask")
-        print("  5. Select and process FG_CO2 data")
-        print("  6. Compute cumulative integrals")
         
         # Read alk-forcing data
-        print("  1. Reading alk-forcing files...", end=" ", flush=True)
         ds = read_alk_forcing_files(
             polygon_id, injection_year, injection_month, years, months
         )
-        print("✓")
+        try:
+            if 'FG_CO2' not in ds:
+                raise KeyError("FG_CO2 variable not found in dataset")
+            
+            if 'FG_ALT_CO2' not in ds:
+                raise KeyError("FG_ALT_CO2 variable not found in dataset")
 
-        # Get FG_CO2 data
-        print("  2. Verifying FG_CO2 variables...", end=" ", flush=True)
-        if 'FG_CO2' not in ds:
-            raise KeyError("FG_CO2 variable not found in dataset")
-        
-        if 'FG_ALT_CO2' not in ds:
-            raise KeyError("FG_ALT_CO2 variable not found in dataset")
-        print("✓")
+            # Create time_delta DataArray with days per month, replicating months for each year
+            # For each year, repeat the months list
+            time_delta_seconds = xr.DataArray(
+                [DAYS_PER_MONTH[m - 1] * 86400.0 for _ in years for m in months],
+                dims=['elapsed_time'],
+                coords={'elapsed_time': ds.elapsed_time} if 'elapsed_time' in ds.coords else None
+            )
+            
+            # Get TAREA for area weighting
+            tarea = self.atlas_grid.TAREA
+            nlat, nlon = tarea.shape
 
-        # Create time_delta DataArray with days per month, replicating months for each year
-        # For each year, repeat the months list
-        print("  3. Creating time delta array...", end=" ", flush=True)
-        time_delta_seconds = xr.DataArray(
-            [DAYS_PER_MONTH[m - 1] * 86400.0 for _ in years for m in months],
-            dims=['elapsed_time'],
-            coords={'elapsed_time': ds.elapsed_time} if 'elapsed_time' in ds.coords else None
-        )
-        print("✓")
-        
-        # Get TAREA for area weighting
-        print("  4. Getting TAREA and boundary mask...", end=" ", flush=True)
-        tarea = self.atlas_grid.TAREA
-        nlat, nlon = tarea.shape
+            # Get indices within boundaries if not already computed
+            if self._within_boundaries_indices is None:
+                self._get_polygon_ids_within_boundaries()
+            
+            # Create mask for points within grid boundaries
+            within_mask = np.zeros((nlat, nlon), dtype=bool)
+            within_mask.ravel()[self._within_boundaries_indices] = True
 
-        # Get indices within boundaries if not already computed
-        if self._within_boundaries_indices is None:
-            self._get_polygon_ids_within_boundaries()
-        
-        # Create mask for points within grid boundaries
-        within_mask = np.zeros((nlat, nlon), dtype=bool)
-        within_mask.ravel()[self._within_boundaries_indices] = True
-        print("✓")
+            # Select and process FG_CO2 data
+            fg_co2_alt_co2 = ds.FG_ALT_CO2.sel(
+                polygon_id=polygon_id, injection_date=injection_date
+            ).squeeze()
 
-        # Select and process FG_CO2 data
-        print("  5. Selecting and processing FG_CO2 data...", end=" ", flush=True)
-        fg_co2_alt_co2 = ds.FG_ALT_CO2.sel(
-            polygon_id=polygon_id, injection_date=injection_date
-        ).squeeze()
+            fg_co2 = ds.FG_CO2.sel(
+                polygon_id=polygon_id, injection_date=injection_date
+            ).squeeze()
+            
 
-        fg_co2 = ds.FG_CO2.sel(
-            polygon_id=polygon_id, injection_date=injection_date
-        ).squeeze()
-        
+            fg_co2_additional = fg_co2 - fg_co2_alt_co2 # nmol/cm2/s
+            fg_co2_additional *= 1e-9 # mol/cm2/s
 
-        fg_co2_additional = fg_co2 - fg_co2_alt_co2 # nmol/cm2/s
-        fg_co2_additional *= 1e-9 # mol/cm2/s
-        print("✓")
-
-        # Compute cumulative integrals
-        print("  6. Computing cumulative integrals...", end=" ", flush=True)
-        fg_co2_int_within = (
-            (fg_co2_additional * time_delta_seconds * tarea.where(within_mask))
-            .sum(dim=['nlat', 'nlon'])
-            .cumsum(dim='elapsed_time')
-        )
-        fg_co2_int_total = (
-            (fg_co2_additional * time_delta_seconds * tarea)
-            .sum(dim=['nlat', 'nlon'])
-            .cumsum(dim='elapsed_time')
-        )
-        fraction = fg_co2_int_within / fg_co2_int_total
-        print("✓")
-        
-        # Return as xarray Dataset
-        return xr.Dataset({
-            'total': fg_co2_int_total,
-            'within_grid': fg_co2_int_within,
-            'fraction': fraction
-        })
+            # Compute cumulative integrals
+            fg_co2_int_within = (
+                (fg_co2_additional * time_delta_seconds * tarea.where(within_mask))
+                .sum(dim=['nlat', 'nlon'])
+                .cumsum(dim='elapsed_time')
+            )
+            fg_co2_int_total = (
+                (fg_co2_additional * time_delta_seconds * tarea)
+                .sum(dim=['nlat', 'nlon'])
+                .cumsum(dim='elapsed_time')
+            )
+            fraction = fg_co2_int_within / fg_co2_int_total
+            
+            # Return as xarray Dataset
+            results = xr.Dataset({
+                'total': fg_co2_int_total,
+                'within_grid': fg_co2_int_within,
+                'fraction': fraction
+            }).compute()
+            return results
+        finally:
+            ds.close()
     
     def integrate_fg_co2_all_polygons(
         self, years, months=None, injection_year=1999, injection_month=1
@@ -579,94 +579,3 @@ class AtlasModelGridAnalyzer:
         # Concatenate along polygon_id dimension
         return xr.concat(datasets, dim='polygon_id')
 
-
-class dask_cluster(object):
-    """ad hoc script to launch a dask cluster"""
-
-    def __init__(self, account, n_nodes=4, n_tasks_per_node=64, wallclock="04:00:00"):
-        path_dask = f"{SCRATCH}/dask"
-        os.makedirs(path_dask, exist_ok=True)
-
-        scheduler_file = tempfile.mktemp(
-            prefix="dask_scheduler_file.", suffix=".json", dir=path_dask
-        )
-
-        script = textwrap.dedent(
-            f"""\
-            #!/bin/bash
-            #SBATCH --job-name dask-worker
-            #SBATCH --account {account}
-            #SBATCH --qos=premium
-            #SBATCH --nodes={n_nodes}
-            #SBATCH --ntasks-per-node={n_tasks_per_node}
-            #SBATCH --time={wallclock}
-            #SBATCH --constraint=cpu
-            #SBATCH --error {path_dask}/dask-workers/dask-worker-%J.err
-            #SBATCH --output {path_dask}/dask-workers/dask-worker-%J.out
-
-            echo "Starting scheduler..."
-
-            scheduler_file={scheduler_file}
-            rm -f $scheduler_file
-
-            module load python
-            conda activate atlas-calcs
-
-            #start scheduler
-            DASK_DISTRIBUTED__COMM__TIMEOUTS__CONNECT=3600s \
-            DASK_DISTRIBUTED__COMM__TIMEOUTS__TCP=3600s \
-            dask scheduler \
-                --interface hsn0 \
-                --scheduler-file $scheduler_file &
-
-            dask_pid=$!
-
-            # Wait for the scheduler to start
-            sleep 5
-            until [ -f $scheduler_file ]
-            do
-                 sleep 5
-            done
-
-            echo "Starting workers"
-
-            #start scheduler
-            DASK_DISTRIBUTED__COMM__TIMEOUTS__CONNECT=3600s \
-            DASK_DISTRIBUTED__COMM__TIMEOUTS__TCP=3600s \
-            srun dask-worker \
-            --scheduler-file $scheduler_file \
-                --interface hsn0 \
-                --nworkers 1 
-
-            echo "Killing scheduler"
-            kill -9 $dask_pid
-            """
-        )
-
-        script_file = tempfile.mktemp(prefix="launch-dask.", dir=path_dask)
-        with open(script_file, "w") as fid:
-            fid.write(script)
-
-        print(f"spinning up dask cluster with scheduler:\n  {scheduler_file}")
-        self.jobid = (
-            check_output(f"sbatch {script_file} " + "awk '{print $1}'", shell=True)
-            .decode("utf-8")
-            .strip()
-            .split(" ")[-1]
-        )
-
-        while not os.path.exists(scheduler_file):
-            time.sleep(5)
-
-        print("cluster running...")
-
-        dask.config.config["distributed"]["dashboard"][
-            "link"
-        ] = "{JUPYTERHUB_SERVICE_PREFIX}proxy/{host}:{port}/status"
-
-        self.client = Client(scheduler_file=scheduler_file)
-        print(f"Dashboard:\n {JUPYTERHUB_URL}/{self.client.dashboard_link}")
-
-    def shutdown(self):
-        self.client.shutdown()
-        check_call(f"scancel {self.jobid}", shell=True)
