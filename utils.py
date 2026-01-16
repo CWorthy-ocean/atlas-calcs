@@ -76,7 +76,6 @@ class dask_cluster(object):
             )
 
         self.local_cluster = False
-        dask.config.config["distributed"]["dashboard"]["link"] = self.dashboard_link
         dask.config.config["distributed"]["dashboard"][
             "link"
         ] = "{JUPYTERHUB_SERVICE_PREFIX}proxy/{host}:{port}/status"
