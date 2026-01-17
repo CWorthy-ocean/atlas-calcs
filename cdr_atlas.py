@@ -188,54 +188,72 @@ def _get_atlas_file_info(polygon_id, injection_year, injection_month, year, mont
 def get_atlas_data(polygon_id, injection_year, injection_month, year, month, force_download=False):
     """
     Retrieve atlas data from S3 for a given polygon, injection date, and time period.
-    
-    Uses local cache to avoid re-downloading files. Files are cached in a directory
-    structure mirroring the S3 path.
-    
-    Parameters
-    ----------
-    polygon_id : int or float
-        Polygon ID (e.g., 0, 1, 2). Will be converted to integer.
-    injection_year : int or float
-        Injection year (e.g., 1999). Will be converted to integer.
-    injection_month : int or float
-        Injection month (1-12). Will be converted to integer.
-    year : int or float
-        Year of the data file (e.g., 347). Will be converted to integer.
-    month : int or float
-        Month of the data file (1-12). Will be converted to integer.
-    force_download : bool, optional
-        If True, force download even if file exists in cache. Default is False.
-    
-    Returns
-    -------
-    pathlib.Path
-        Path to the local cached file.
-    
-    Raises
-    ------
-    ValueError
-        If exactly one matching file is not found in S3.
     """
-    # Convert to integers to ensure proper formatting
     polygon_id = int(polygon_id)
     injection_year = int(injection_year)
     injection_month = int(injection_month)
     year = int(year)
     month = int(month)
-    
+
     s3_file, cache_path = _get_atlas_file_info(
         polygon_id, injection_year, injection_month, year, month
     )
-    
+
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Check if file exists locally and download if needed
+
     if force_download or not cache_path.exists():
         fs = s3fs.S3FileSystem(anon=True)
         fs.get(s3_file, str(cache_path))
-    
+
     return cache_path
+
+
+def _collect_alk_forcing_files(polygon_id, injection_year, injection_month, years, months):
+    """
+    Resolve all alk-forcing files to their S3 and cache paths.
+    """
+    polygon_id = int(polygon_id)
+    injection_year = int(injection_year)
+    injection_month = int(injection_month)
+
+    s3_files = []
+    cache_paths = []
+    for year in years:
+        for month in months:
+            try:
+                s3_file, cache_path = _get_atlas_file_info(
+                    polygon_id, injection_year, injection_month, year, month
+                )
+            except ValueError as exc:
+                raise FileNotFoundError(
+                    f"Could not find file for year={year}, month={month}: {exc}"
+                ) from exc
+            s3_files.append(s3_file)
+            cache_paths.append(cache_path)
+    return s3_files, cache_paths
+
+
+def _download_missing_files(s3_files, cache_paths, force_download=False, batch_size=50):
+    """
+    Download missing files from S3 in batches.
+    """
+    to_download = []
+    for s3_file, cache_path in zip(s3_files, cache_paths):
+        if force_download or not cache_path.exists():
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            to_download.append((s3_file, cache_path))
+
+    if not to_download:
+        return 0
+
+    fs = s3fs.S3FileSystem(anon=True)
+    for start in range(0, len(to_download), batch_size):
+        chunk = to_download[start : start + batch_size]
+        fs.get(
+            [s3 for s3, _ in chunk],
+            [str(path) for _, path in chunk],
+        )
+    return len(to_download)
 
 
 def read_alk_forcing_files(polygon_id, injection_year, injection_month, years, months):
@@ -273,40 +291,13 @@ def read_alk_forcing_files(polygon_id, injection_year, injection_month, years, m
     if months is None or len(months) == 0:
         raise ValueError("months must be provided as a non-empty list")
     
-    # Convert to integers
-    polygon_id = int(polygon_id)
-    injection_year = int(injection_year)
-    injection_month = int(injection_month)
-    
-    # Step 1: Assess which files need to be downloaded
-    files_to_download = []
-    cache_paths = []
-    
-    for year in years:
-        for month in months:
-            try:
-                s3_file, cache_path = _get_atlas_file_info(
-                    polygon_id, injection_year, injection_month, year, month
-                )
-                cache_paths.append(cache_path)
-                
-                # Check if file needs downloading
-                if not cache_path.exists():
-                    files_to_download.append((s3_file, cache_path))
-            except ValueError as e:
-                raise FileNotFoundError(f"Could not find file for year={year}, month={month}: {e}")
-    
-    # Step 2: Notify user and download files if needed
-    if files_to_download:
-        n_files = len(files_to_download)
-        print(f"Downloading {n_files} file(s) from S3...")
-        
-        fs = s3fs.S3FileSystem(anon=True)
-        for s3_file, cache_path in files_to_download:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            fs.get(s3_file, str(cache_path))
-        
-        print(f"Downloaded {n_files} file(s).")
+    s3_files, cache_paths = _collect_alk_forcing_files(
+        polygon_id, injection_year, injection_month, years, months
+    )
+
+    n_downloaded = _download_missing_files(s3_files, cache_paths)
+    if n_downloaded:
+        print(f"Downloaded {n_downloaded} file(s) from S3.")
     else:
         print(f"Using cached files for all {len(cache_paths)} requested file(s).")
     

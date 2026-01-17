@@ -7,8 +7,29 @@ import application
 import parsers
 
 
-def test_load_yaml_params_single_document():
-    yaml_path = Path(__file__).resolve().parents[1] / "cson_grids.yml"
+def test_load_yaml_params_single_document(tmp_path):
+    yaml_path = tmp_path / "single.yml"
+    yaml_path.write_text(
+        "\n".join(
+            [
+                "ccs:",
+                "  nx: 224",
+                "  ny: 440",
+                "  size_x: 2688",
+                "  size_y: 5280",
+                "  center_lon: -134.5",
+                "  center_lat: 39.6",
+                "  rot: 33.3",
+                "  N: 100",
+                "  hc: 250",
+                "  theta_s: 6.0",
+                "  theta_b: 6.0",
+                "  verbose: true",
+                "  hmin: 5.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
     params = parsers.load_yaml_params(yaml_path)
     ccs = params["ccs"]
 
@@ -260,12 +281,12 @@ def test_load_app_config(tmp_path):
                 "notebooks:",
                 "  title: Test",
                 "  notebooks:",
-                "- regional-domain-sizing:",
-                "    parameters:",
-                "      grid_yaml: tests/_grid.yml",
-                "      test: true",
-                "      scheduler_file: null",
-                "    output_path: executed/domain-sizing/example.ipynb",
+                "  - regional-domain-sizing:",
+                "      parameters:",
+                "        grid_yaml: tests/_grid.yml",
+                "        test: true",
+                "        scheduler_file: null",
+                "      output_path: executed/domain-sizing/example.ipynb",
                 "",
             ]
         ),

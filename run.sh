@@ -19,6 +19,7 @@ fi
 yaml_file=$1
 
 if $sbatch_flag; then
+  submit_dir="$PWD"
   sbatch <<EOF
 #!/usr/bin/env bash
 #SBATCH --job-name atlas-calcs
@@ -30,7 +31,7 @@ if $sbatch_flag; then
 #SBATCH --time 02:00:00
 
 set -euo pipefail
-cd /Users/mclong/codes/atlas-calcs
+cd "$submit_dir"
 ./run.sh "$yaml_file"
 EOF
   exit $?
