@@ -69,23 +69,6 @@ def _render_markdown_placeholders(
     return Path(temp_path)
 
 
-def _update_myst_toc(myst_path: Path, toc_entry: Any) -> None:
-    import yaml
-
-    data = yaml.safe_load(myst_path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError("myst.yml must contain a top-level mapping.")
-    project = data.get("project")
-    if not isinstance(project, dict):
-        project = {}
-        data["project"] = project
-    project["toc"] = toc_entry
-    myst_path.write_text(
-        yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
-
-
 def run_notebook(
     notebook_path: Path,
     output_path: Path,
@@ -121,7 +104,28 @@ def parse_args(args: Optional[Iterable[str]] = None) -> argparse.Namespace:
         "yaml_file",
         help="Path to parameters.yml file.",
     )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Force test settings (n_test=2, test=True) in notebook parameters.",
+    )
     return parser.parse_args(args=args)
+
+
+def _apply_test_overrides(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "n_test":
+                value[key] = 2
+                continue
+            if key == "test":
+                value[key] = True
+                continue
+            _apply_test_overrides(item)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _apply_test_overrides(item)
 
 
 def main(args: Optional[Iterable[str]] = None) -> int:
@@ -143,13 +147,15 @@ def main(args: Optional[Iterable[str]] = None) -> int:
     completed = []
     failed = []
     try:
-        for entry in app_config.notebook_list.notebooks:
+        for entry in app_config.notebook_list.iter_entries():
             parameters = dict(entry.config.parameters)
             
             if dask_cluster_kwargs is not None:
                 parameters["dask_cluster_kwargs"] = dask_cluster_kwargs
             if cluster is not None:
                 parameters["dask_cluster_kwargs"]["scheduler_file"] = cluster.scheduler_file
+            if parsed.test:
+                _apply_test_overrides(parameters)
             
             notebook_path = Path(entry.notebook_name)
             if notebook_path.suffix == "":
@@ -175,17 +181,6 @@ def main(args: Optional[Iterable[str]] = None) -> int:
             logger.info("Shutting down cluster")
             cluster.shutdown()
     
-    myst_path = Path("myst.yml")
-    toc_entry = app_config.notebook_list.to_toc_entry(base_dir=Path(parsed.yaml_file).parent)
-    toc_list = [{"file": "README.md"}, toc_entry]
-    try:
-        if myst_path.exists():
-            _update_myst_toc(myst_path, toc_list)
-            logger.info("Updated myst.yml toc at %s", myst_path)
-        else:
-            logger.warning("myst.yml not found at %s; skipping toc update", myst_path)
-    except Exception:
-        logger.exception("Failed to update myst.yml toc at %s", myst_path)
     if failed:
         raise RuntimeError(
             "Notebook execution failures. Completed: {completed}; Failed: {failed}".format(

@@ -11,9 +11,8 @@ This module provides functions and classes for:
 import os
 from pathlib import Path
 
-import time
-
 import numpy as np
+import pandas as pd
 import s3fs
 
 import xarray as xr
@@ -36,30 +35,166 @@ DAYS_PER_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 # Initialize cache directory
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+
+class DatasetSpec:
+    def __init__(
+        self,
+        name,
+        s3_base_url,
+        n_years,
+        polygon_ids,
+        injection_years,
+        injection_months,
+        model_year_align: int = 0,
+        model_year_offset: int = 0,
+    ):
+        self.name = name
+        self.s3_base_url = s3_base_url
+        self.n_years = n_years
+        self.polygon_ids = polygon_ids
+        self.injection_years = injection_years
+        self.injection_months = injection_months
+        self.model_year_align = model_year_align
+        self.model_year_offset = model_year_offset
+
+    @property
+    def df(self):
+        return self._df()
+
+    def _build_year_month_pairs(self, injection_month):
+        year_month_pairs = []
+        month = injection_month
+        year = self.model_year_align - self.model_year_offset
+        for n in range(self.n_years * 12):
+            year_month_pairs.append((year, month))
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+        return year_month_pairs        
+
+    def get_polygon_masks_dataset(self, force_download: bool = False) -> xr.Dataset:
+        """
+        Return the polygon masks dataset, downloading and caching if needed.
+
+        Parameters
+        ----------
+        force_download : bool, optional
+            If True, re-download even if cached. Default is False.
+        """
+        polygon_masks_url = f"{self.s3_base_url}/polygon_masks.nc"
+        polygon_masks_cache_path = CACHE_DIR / "polygon_masks.nc"
+        if force_download or not polygon_masks_cache_path.exists():
+            polygon_masks_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            fs = s3fs.S3FileSystem(anon=True)
+            fs.get(polygon_masks_url, str(polygon_masks_cache_path))
+        return xr.open_dataset(polygon_masks_cache_path)
+
+    def _df(self):
+        """Build a DataFrame of all expected S3 and cache paths."""
+        records = []
+        for injection_year in self.injection_years:
+            for injection_month in self.injection_months:
+                for polygon_id in self.polygon_ids:
+                    for year, month in self._build_year_month_pairs(injection_month):
+                        records.append(
+                            {
+                                "injection_year": injection_year,
+                                "polygon_id": polygon_id,
+                                "injection_month": injection_month,
+                                "year": year,
+                                "month": month,
+                                "s3_path": (
+                                    f"{self.s3_base_url}/experiments/{polygon_id:03d}/{injection_month:02d}/"
+                                    f"alk-forcing.{polygon_id:03d}-{injection_year:04d}-{injection_month:02d}"
+                                    f".pop.h.{year:04d}-{month:02d}.nc"
+                                ),
+                                "cache_path": (
+                                    f"{CACHE_DIR}/experiments/{polygon_id:03d}/{injection_month:02d}/"
+                                    f"alk-forcing.{polygon_id:03d}-{injection_year:04d}-{injection_month:02d}"
+                                    f".pop.h.{year:04d}-{month:02d}.nc"
+                                ),
+                            }
+                        )
+        df = pd.DataFrame.from_records(records)
+        df.set_index(
+            ["injection_year", "polygon_id", "injection_month", "year", "month"],
+            inplace=True,
+        )
+        return df
+
+    def query(self, polygon_id=None, injection_year=None, injection_month=None, n_test=None):
+
+        manifest_df = self.df.reset_index()
+        if polygon_id is not None:
+            manifest_df = manifest_df[manifest_df["polygon_id"] == polygon_id]
+        if injection_year is not None:
+            manifest_df = manifest_df[manifest_df["injection_year"] == injection_year]
+        if injection_month is not None:
+            manifest_df = manifest_df[manifest_df["injection_month"] == injection_month]
+        if n_test is not None:
+            manifest_df = manifest_df.head(n_test)
+        
+        return (
+            manifest_df[["s3_path", "cache_path"]]
+            .to_dict(orient="records")
+        )
+
+    def ensure_cache(
+        self,
+        polygon_id=None,
+        injection_year=None,
+        injection_month=None,
+        n_test=None,
+        batch_size=50,
+    ):
+        manifest = self.query(
+            polygon_id=polygon_id,
+            injection_year=injection_year,
+            injection_month=injection_month,
+            n_test=n_test,
+        )
+        s3_files = [entry["s3_path"] for entry in manifest]
+        cache_paths = [Path(entry["cache_path"]) for entry in manifest]
+        _download_missing_files(s3_files, cache_paths, batch_size=batch_size)
+        return manifest
+
+    def open_dataset(self, polygon_id=None, injection_year=None, injection_month=None, n_test=None):
+        manifest = self.ensure_cache(
+            polygon_id=polygon_id,
+            injection_year=injection_year,
+            injection_month=injection_month,
+            n_test=n_test,
+        )
+        cache_paths = [entry["cache_path"] for entry in manifest]
+        return xr.open_mfdataset(
+            cache_paths,
+            combine="by_coords",
+            decode_timedelta=True,
+        )
+
+
+DATASET_REGISTRY = {
+    "oae-efficiency-map_atlas-v0": DatasetSpec(
+        name="oae-efficiency-map_atlas-v0",
+        s3_base_url=S3_BASE_URL,
+        n_years=15,
+        polygon_ids=list(range(0, 690)),
+        injection_years=[1999],
+        injection_months=[1, 4, 7, 10],
+        model_year_align=1999,
+        model_year_offset=1652,
+    )
+}
+
+
+
 def get_pop_grid(force_download: bool = False) -> xr.Dataset:
     """
     Return the POP grid dataset, downloading and caching if needed.
     """
     return pop_tools.get_grid(grid_name="POP_gx1v7")
     
-
-def get_polygon_masks_dataset(force_download: bool = False) -> xr.Dataset:
-    """
-    Return the polygon masks dataset, downloading and caching if needed.
-
-    Parameters
-    ----------
-    force_download : bool, optional
-        If True, re-download even if cached. Default is False.
-    """
-    polygon_masks_url = f"{S3_BASE_URL}/polygon_masks.nc"
-    polygon_masks_cache_path = CACHE_DIR / "polygon_masks.nc"
-    if force_download or not polygon_masks_cache_path.exists():
-        polygon_masks_cache_path.parent.mkdir(parents=True, exist_ok=True)
-        fs = s3fs.S3FileSystem(anon=True)
-        fs.get(polygon_masks_url, str(polygon_masks_cache_path))
-    return xr.open_dataset(polygon_masks_cache_path)
-
 
 
 def points_within_grid_boundaries(model_grid, points_lat, points_lon):
@@ -130,109 +265,6 @@ def points_within_grid_boundaries(model_grid, points_lat, points_lon):
     return np.where(within_bounds)[0]
 
 
-def _get_atlas_file_info(polygon_id, injection_year, injection_month, year, month):
-    """
-    Get S3 file path and local cache path for a given polygon and time period.
-    
-    Parameters
-    ----------
-    polygon_id : int
-        Polygon ID.
-    injection_year : int
-        Injection year.
-    injection_month : int
-        Injection month (1-12).
-    year : int
-        Year of the data file.
-    month : int
-        Month of the data file (1-12).
-    
-    Returns
-    -------
-    tuple
-        (s3_file_path, cache_path) tuple.
-    
-    Raises
-    ------
-    ValueError
-        If exactly one matching file is not found in S3.
-    """
-    fs = s3fs.S3FileSystem(anon=True)
-    
-    # Construct S3 path
-    s3_prefix = f"{S3_BASE_URL}/experiments/{polygon_id:03d}/{injection_month:02d}/"
-    all_files = fs.ls(s3_prefix)
-    
-    # Filter files to include only those ending in {year:04d}-{month:02d}.nc
-    pattern = f"{year:04d}-{month:02d}.nc"
-    s3_files = [f for f in all_files if f.endswith(pattern)]
-    
-    if len(s3_files) != 1:
-        raise ValueError(
-            f"Expected exactly 1 file matching pattern {pattern} in {s3_prefix}, "
-            f"found {len(s3_files)}"
-        )
-    
-    s3_file = s3_files[0]
-    
-    # Construct local cache path
-    cache_path = (
-        Path(CACHE_DIR) 
-        / f"experiments/{polygon_id:03d}/{injection_month:02d}" 
-        / os.path.basename(s3_file)
-    )
-    
-    return s3_file, cache_path
-
-
-def get_atlas_data(polygon_id, injection_year, injection_month, year, month, force_download=False):
-    """
-    Retrieve atlas data from S3 for a given polygon, injection date, and time period.
-    """
-    polygon_id = int(polygon_id)
-    injection_year = int(injection_year)
-    injection_month = int(injection_month)
-    year = int(year)
-    month = int(month)
-
-    s3_file, cache_path = _get_atlas_file_info(
-        polygon_id, injection_year, injection_month, year, month
-    )
-
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if force_download or not cache_path.exists():
-        fs = s3fs.S3FileSystem(anon=True)
-        fs.get(s3_file, str(cache_path))
-
-    return cache_path
-
-
-def _collect_alk_forcing_files(polygon_id, injection_year, injection_month, years, months):
-    """
-    Resolve all alk-forcing files to their S3 and cache paths.
-    """
-    polygon_id = int(polygon_id)
-    injection_year = int(injection_year)
-    injection_month = int(injection_month)
-
-    s3_files = []
-    cache_paths = []
-    for year in years:
-        for month in months:
-            try:
-                s3_file, cache_path = _get_atlas_file_info(
-                    polygon_id, injection_year, injection_month, year, month
-                )
-            except ValueError as exc:
-                raise FileNotFoundError(
-                    f"Could not find file for year={year}, month={month}: {exc}"
-                ) from exc
-            s3_files.append(s3_file)
-            cache_paths.append(cache_path)
-    return s3_files, cache_paths
-
-
 def _download_missing_files(s3_files, cache_paths, force_download=False, batch_size=50):
     """
     Download missing files from S3 in batches.
@@ -249,77 +281,19 @@ def _download_missing_files(s3_files, cache_paths, force_download=False, batch_s
     fs = s3fs.S3FileSystem(anon=True)
     for start in range(0, len(to_download), batch_size):
         chunk = to_download[start : start + batch_size]
-        fs.get(
-            [s3 for s3, _ in chunk],
-            [str(path) for _, path in chunk],
-        )
+        if not chunk:
+            continue
+        s3_chunk = [s3 for s3, _ in chunk]
+        path_chunk = [str(path) for _, path in chunk]
+        if len(s3_chunk) != len(path_chunk):
+            raise ValueError("S3 and cache path lists are mismatched.")
+        try:
+            fs.get(s3_chunk, path_chunk)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to download {len(s3_chunk)} file(s) from S3."
+            ) from exc
     return len(to_download)
-
-
-def read_alk_forcing_files(polygon_id, injection_year, injection_month, years, months):
-    """
-    Read and combine alk-forcing files for a given polygon ID and time period.
-    
-    First assesses which files need to be downloaded, notifies the user, then downloads
-    and reads all files.
-    
-    Parameters
-    ----------
-    polygon_id : int or float
-        Polygon ID (e.g., 0, 1, 2). Will be converted to integer.
-    injection_year : int
-        Injection year (e.g., 1999).
-    injection_month : int
-        Injection month (1-12).
-    years : list of int
-        List of year integers (e.g., [347, 348, 349]).
-    months : list of int
-        List of month numbers (1-12). Must be provided.
-    
-    Returns
-    -------
-    xarray.Dataset
-        Combined dataset with all requested time periods concatenated along time dimension.
-    
-    Raises
-    ------
-    ValueError
-        If months is None or empty.
-    FileNotFoundError
-        If any requested file is not found.
-    """
-    if months is None or len(months) == 0:
-        raise ValueError("months must be provided as a non-empty list")
-    
-    s3_files, cache_paths = _collect_alk_forcing_files(
-        polygon_id, injection_year, injection_month, years, months
-    )
-
-    n_downloaded = _download_missing_files(s3_files, cache_paths)
-    if n_downloaded:
-        print(f"Downloaded {n_downloaded} file(s) from S3.")
-    else:
-        print(f"Using cached files for all {len(cache_paths)} requested file(s).")
-    
-    # Step 3: Verify all files exist and read them
-    files = []
-    for cache_path in cache_paths:
-        if not cache_path.exists():
-            raise FileNotFoundError(
-                f"File not found after download attempt: {cache_path}"
-            )
-        files.append(str(cache_path))
-    
-    return xr.open_mfdataset(
-        files,
-        decode_timedelta=True,
-        compat="override",
-        coords="minimal",
-        data_vars="minimal",
-        parallel=True,
-        chunks={},
-        engine="h5netcdf",
-    )
 
 
 class AtlasModelGridAnalyzer:
@@ -334,30 +308,23 @@ class AtlasModelGridAnalyzer:
     ----------
     model_grid : Grid
         Model grid object with ds attribute containing lat_u and lon_u.
-    atlas_grid : xarray.Dataset
-        Atlas grid dataset with TLAT, TLONG, and TAREA variables.
-    polygon_ids : xarray.DataArray
-        DataArray containing polygon_id field.
-    polygon_ids_in_bounds : numpy.ndarray
-        Unique array of polygon IDs within the model grid boundaries.
     """
     
-    def __init__(self, model_grid, atlas_grid, polygon_ids):
+    def __init__(self, model_grid, atlas_data):
         """
         Initialize the analyzer.
         
         Parameters
         ----------
         model_grid : Grid
-            Model grid object with ds attribute containing lat_u and lon_u.
-        atlas_grid : xarray.Dataset
-            Atlas grid dataset with TLAT, TLONG, and TAREA variables.
-        polygon_ids : xarray.DataArray
-            DataArray containing polygon_id field.
+            Model grid object with ds attribute containing lat_u and lon_u. 
+        atlas_data : DatasetSpec
+            Atlas data object with polygon_id, injection_year, injection_month, and years.
         """
         self.model_grid = model_grid
-        self.atlas_grid = atlas_grid
-        self.polygon_ids = polygon_ids
+        self.atlas_data = atlas_data
+        self.atlas_grid = get_pop_grid()
+        self._polygon_mask = None
         
         # Cache for computed properties
         self._within_boundaries_indices = None
@@ -366,6 +333,13 @@ class AtlasModelGridAnalyzer:
         # Compute polygon IDs within boundaries on initialization
         self._get_polygon_ids_within_boundaries()
     
+    @property
+    def polygon_mask(self):
+        if self._polygon_mask is None:
+            ds_atlas_polygons = self.atlas_data.get_polygon_masks_dataset()
+            self._polygon_mask = ds_atlas_polygons.polygon_id.where(self.atlas_grid.KMT > 0)
+        return self._polygon_mask
+
     def _get_polygon_ids_within_boundaries(self):
         """
         Identify polygon IDs that are within the model grid boundary.
@@ -388,7 +362,7 @@ class AtlasModelGridAnalyzer:
         self._within_boundaries_indices = indices
         
         # Get polygon IDs at those indices
-        polygon_id_flat = self.polygon_ids.values.ravel()
+        polygon_id_flat = self.polygon_mask.values.ravel()
         polygon_ids_in_bounds = polygon_id_flat[indices]
         
         # Get unique polygon IDs (exclude negative values which may indicate invalid/masked)
@@ -396,7 +370,7 @@ class AtlasModelGridAnalyzer:
             polygon_ids_in_bounds[polygon_ids_in_bounds >= 0]
         )
         
-        self.polygon_id_mask = self.polygon_ids.copy()
+        self.polygon_id_mask = self.polygon_mask.copy()
         nlat, nlon = self.polygon_id_mask.shape
         within_mask_flat = np.zeros(nlat * nlon, dtype=bool)
         within_mask_flat[self._within_boundaries_indices] = True
@@ -414,16 +388,17 @@ class AtlasModelGridAnalyzer:
         within_mask = within_mask_flat.reshape(nlat, nlon)
 
         field_flat = self.polygon_id_mask.copy().where(within_mask, 0.0).where(self.atlas_grid.KMT > 0).values.ravel()
+        field_flat[:] = np.nan
         for n, id in enumerate(field_by_id.polygon_id.values):
             ndx = np.where(self.polygon_id_mask.values.ravel() == id)[0]
             field_flat[ndx] = field_by_id[n]
 
         field_mapped = self.polygon_id_mask.copy()
-        field_mapped.values = field_flat.reshape(nlat, nlon)
+        field_mapped.values = field_flat.reshape(nlat, nlon)        
         return field_mapped
 
-    def integrate_fg_co2_polygon(
-        self, polygon_id, years, months=None, injection_year=1999, injection_month=1
+    def integrate_fg_co2_polygon_by_id(
+        self, polygon_id, injection_year, injection_month, years=None, n_test=None
     ):
         """
         Integrate FG_CO2 over time, lat, and lon using TAREA for area weighting.
@@ -435,15 +410,14 @@ class AtlasModelGridAnalyzer:
         ----------
         polygon_id : int or float
             Polygon ID. Will be converted to integer.
-        years : list of int
+        injection_year : int
+            Injection year (e.g., 1999).
+        injection_month : int
+            Injection month (1-12).
+        years : list of int, optional
             List of year integers (e.g., [347, 348, 349]).
-        months : list of int, optional
-            List of month numbers (1-12). If None, uses all months (1-12).
-            Default is None.
-        injection_year : int, optional
-            Injection year. Default is 1999.
-        injection_month : int, optional
-            Injection month (1-12). Default is 1.
+        n_test : int, optional
+            If provided, limit the download to the first n_test files.
         
         Returns
         -------
@@ -457,27 +431,20 @@ class AtlasModelGridAnalyzer:
         Raises
         ------
         ValueError
-            If months is not a valid list of integers.
+            If n_test is provided but is not a positive integer.
         KeyError
             If FG_CO2 variable is not found in dataset.
         """
-        # Validate and set default months
-        if months is None:
-            months = list(range(1, 13))
-        else:
-            if not isinstance(months, list):
-                raise ValueError("months must be a list of integers")
-            if not all(isinstance(m, int) for m in months):
-                raise ValueError("months must be a list of integers")
-            if not all(1 <= m <= 12 for m in months):
-                raise ValueError("months must be integers between 1 and 12")
-        
+               
         # Print plan before starting
         injection_date = f"{injection_year:04d}-{injection_month:02d}"
         
         # Read alk-forcing data
-        ds = read_alk_forcing_files(
-            polygon_id, injection_year, injection_month, years, months
+        ds = self.atlas_data.open_dataset(
+            polygon_id=polygon_id,
+            injection_year=injection_year,
+            injection_month=injection_month,
+            n_test=n_test
         )
         try:
             if 'FG_CO2' not in ds:
@@ -486,10 +453,15 @@ class AtlasModelGridAnalyzer:
             if 'FG_ALT_CO2' not in ds:
                 raise KeyError("FG_ALT_CO2 variable not found in dataset")
 
-            # Create time_delta DataArray with days per month, replicating months for each year
-            # For each year, repeat the months list
+            year_month_pairs = self.atlas_data._build_year_month_pairs(injection_month)
+            if n_test is not None:
+                year_month_pairs = year_month_pairs[:n_test]
+            if len(year_month_pairs) > len(ds.elapsed_time):
+                year_month_pairs = year_month_pairs[:len(ds.elapsed_time)]
+
+            # Create time_delta DataArray with days per month, following the year/month pairs
             time_delta_seconds = xr.DataArray(
-                [DAYS_PER_MONTH[m - 1] * 86400.0 for _ in years for m in months],
+                [DAYS_PER_MONTH[month - 1] * 86400.0 for _, month in year_month_pairs],
                 dims=['elapsed_time'],
                 coords={'elapsed_time': ds.elapsed_time} if 'elapsed_time' in ds.coords else None
             )
@@ -542,8 +514,8 @@ class AtlasModelGridAnalyzer:
         finally:
             ds.close()
     
-    def integrate_fg_co2_all_polygons(
-        self, years, months=None, injection_year=1999, injection_month=1
+    def integrate_fg_co2_polygons_within_boundaries(
+        self, injection_year=None, injection_month=None, n_test=None
     ):
         """
         Integrate FG_CO2 for all polygons within model grid boundaries.
@@ -553,15 +525,12 @@ class AtlasModelGridAnalyzer:
         
         Parameters
         ----------
-        years : list of int
-            List of year integers (e.g., [347, 348, 349]).
-        months : list of int, optional
-            List of month numbers (1-12). If None, uses all months (1-12).
-            Default is None.
-        injection_year : int, optional
-            Injection year. Default is 1999.
-        injection_month : int, optional
-            Injection month (1-12). Default is 1.
+        injection_year : int
+            Injection year (e.g., 1999).
+        injection_month : int
+            Injection month (1-12).
+        n_test : int, optional
+            If provided, limit the download to the first n_test files.
         
         Returns
         -------
@@ -570,13 +539,20 @@ class AtlasModelGridAnalyzer:
             for all polygons. Has dimensions (polygon_id, elapsed_time).
         """
         datasets = []
-        for polygon_id in self.polygon_ids_in_bounds:
-            result = self.integrate_fg_co2_polygon(
-                polygon_id, years, months, injection_year, injection_month
+        for n, polygon_id in enumerate(self.polygon_ids_in_bounds):
+            result = self.integrate_fg_co2_polygon_by_id(
+                polygon_id=polygon_id,
+                injection_year=injection_year,
+                injection_month=injection_month,
+                n_test=n_test
             )
             # Add polygon_id as a coordinate to each dataset
             result = result.assign_coords(polygon_id=polygon_id)
             datasets.append(result)
+
+            if n_test is not None and n >= 1:
+                break
+
         # Concatenate along polygon_id dimension
         return xr.concat(datasets, dim='polygon_id')
 

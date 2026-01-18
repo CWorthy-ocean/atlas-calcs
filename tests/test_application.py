@@ -241,8 +241,9 @@ def test_notebook_list_model():
         notebook_name="regional-domain-sizing",
         config=config,
     )
-    notebook_list = parsers.NotebookList(title="Test", notebooks=[entry])
-    assert notebook_list.notebooks[0].notebook_name == "regional-domain-sizing"
+    section = parsers.NotebookSection(title="Test", children=[entry])
+    notebook_list = parsers.NotebookList(sections=[section])
+    assert next(notebook_list.iter_entries()).notebook_name == "regional-domain-sizing"
 
 
 def test_parameters_config_model():
@@ -254,7 +255,8 @@ def test_parameters_config_model():
         notebook_name="regional-domain-sizing",
         config=config,
     )
-    notebook_list = parsers.NotebookList(title="Test", notebooks=[entry])
+    section = parsers.NotebookSection(title="Test", children=[entry])
+    notebook_list = parsers.NotebookList(sections=[section])
     dask_kwargs = parsers.DaskClusterKwargs(
         account="m4632",
         queue_name="premium",
@@ -265,7 +267,7 @@ def test_parameters_config_model():
         notebook_list=notebook_list,
     )
     assert params.dask_cluster_kwargs.account == "m4632"
-    assert params.notebook_list.notebooks[0].notebook_name == "regional-domain-sizing"
+    assert next(params.notebook_list.iter_entries()).notebook_name == "regional-domain-sizing"
 
 
 def test_load_app_config(tmp_path):
@@ -279,8 +281,8 @@ def test_load_app_config(tmp_path):
                 "  scheduler_file: null",
                 "",
                 "notebooks:",
-                "  title: Test",
-                "  notebooks:",
+                "- title: Test",
+                "  children:",
                 "  - regional-domain-sizing:",
                 "      parameters:",
                 "        grid_yaml: tests/_grid.yml",
@@ -296,12 +298,13 @@ def test_load_app_config(tmp_path):
     app_config = parsers.load_app_config(config_path)
 
     assert app_config.dask_cluster_kwargs.account == "m4632"
-    assert app_config.notebook_list.notebooks[0].notebook_name == "regional-domain-sizing"
-    assert app_config.notebook_list.notebooks[0].config.parameters["test"] is True
-    assert app_config.notebook_list.notebooks[0].config.parameters["grid_yaml"] == str(
+    first_entry = next(app_config.notebook_list.iter_entries())
+    assert first_entry.notebook_name == "regional-domain-sizing"
+    assert first_entry.config.parameters["test"] is True
+    assert first_entry.config.parameters["grid_yaml"] == str(
         tmp_path / "tests/_grid.yml"
     )
-    assert app_config.notebook_list.notebooks[0].config.output_path == str(
+    assert first_entry.config.output_path == str(
         tmp_path / "executed/domain-sizing/example.ipynb"
     )
 
@@ -325,7 +328,7 @@ def test_load_app_config_requires_notebooks(tmp_path):
 
 
 def test_parse_notebook_entries_requires_list():
-    with pytest.raises(ValueError, match="notebooks must be a list"):
+    with pytest.raises(ValueError, match="children must be a list"):
         parsers._parse_notebook_entries({"title": "Bad"}, base_dir=Path("."))
 
 

@@ -2,17 +2,29 @@
 set -euo pipefail
 
 sbatch_flag=false
-if [[ ${1:-} == "--sbatch" ]]; then
-  sbatch_flag=true
+test_flag=false
+while [[ ${1:-} == --* ]]; do
+  case "$1" in
+    --sbatch)
+      sbatch_flag=true
+      ;;
+    --test)
+      test_flag=true
+      ;;
+    *)
+      echo "Usage: $0 [--sbatch] [--test] <parameters.yml>"
+      exit 1
+      ;;
+  esac
   shift
-fi
+done
 
 if [[ -z ${1:-} ]]; then
-  echo "Usage: $0 [--sbatch] <parameters.yml>"
+  echo "Usage: $0 [--sbatch] [--test] <parameters.yml>"
   exit 1
 fi
 if [[ -n ${2:-} ]]; then
-  echo "Usage: $0 [--sbatch] <parameters.yml>"
+  echo "Usage: $0 [--sbatch] [--test] <parameters.yml>"
   exit 1
 fi
 
@@ -32,7 +44,7 @@ if $sbatch_flag; then
 
 set -euo pipefail
 cd "$submit_dir"
-./run.sh "$yaml_file"
+./run.sh ${test_flag:+--test} "$yaml_file"
 EOF
   exit $?
 fi
@@ -60,4 +72,4 @@ if ! python -m jupyter kernelspec list 2>/dev/null | grep -q "atlas-calcs"; then
   python -m ipykernel install --user --name atlas-calcs --display-name "atlas-calcs"
 fi
 
-python application.py "$yaml_file"
+python application.py ${test_flag:+--test} "$yaml_file"

@@ -24,24 +24,37 @@ class NotebookEntry(BaseModel):
     config: NotebookConfig
 
 
-class NotebookList(BaseModel):
-    """Schema for a list of notebook entries."""
+class NotebookSection(BaseModel):
+    """Schema for a titled notebook section."""
 
     title: str
-    notebooks: list[NotebookEntry]
+    children: list[NotebookEntry]
 
     def to_toc_entry(self, base_dir: Optional[Path] = None) -> Dict[str, Any]:
         children = []
-        for entry in self.notebooks:
+        for entry in self.children:
             output_path = Path(entry.config.output_path)
-            if base_dir is not None:
-                if output_path.is_absolute():
-                    try:
-                        output_path = output_path.relative_to(base_dir)
-                    except ValueError:
-                        pass
+            if base_dir is not None and output_path.is_absolute():
+                try:
+                    output_path = output_path.relative_to(base_dir)
+                except ValueError:
+                    pass
             children.append({"file": str(output_path)})
         return {"title": self.title, "children": children}
+
+
+class NotebookList(BaseModel):
+    """Schema for a list of notebook sections."""
+
+    sections: list[NotebookSection]
+
+    def iter_entries(self):
+        for section in self.sections:
+            for entry in section.children:
+                yield entry
+
+    def to_toc_entries(self, base_dir: Optional[Path] = None) -> list[Dict[str, Any]]:
+        return [section.to_toc_entry(base_dir=base_dir) for section in self.sections]
 
 class DaskClusterKwargs(BaseModel):
     """Schema for dask_cluster_kwargs configuration."""
@@ -61,21 +74,24 @@ class AppConfig(BaseModel):
     notebook_list: NotebookList
 
 
-def _parse_notebook_entries(raw_entries: Any, base_dir: Path) -> NotebookList:
-    if isinstance(raw_entries, dict):
-        title = raw_entries.get("title", "Untitled")
-        raw_entries = raw_entries.get("notebooks")
-    else:
-        title = "Untitled"
-    if not isinstance(raw_entries, list):
-        raise ValueError("notebooks must be a list of entries.")
+def _parse_notebook_entry_list(raw_entries: list[Any], base_dir: Path) -> list[NotebookEntry]:
     entries = []
     for item in raw_entries:
-        if not isinstance(item, dict) or len(item) != 1:
+        if not isinstance(item, dict):
             raise ValueError("Each notebook entry must be a single-key mapping.")
-        notebook_name, payload = next(iter(item.items()))
-        if not isinstance(payload, dict):
-            raise ValueError("Notebook entry payload must be a mapping.")
+        if len(item) == 1:
+            notebook_name, payload = next(iter(item.items()))
+            if not isinstance(payload, dict):
+                raise ValueError("Notebook entry payload must be a mapping.")
+        else:
+            notebook_keys = [key for key in item.keys() if isinstance(key, str) and key.endswith(".ipynb")]
+            if len(notebook_keys) != 1:
+                raise ValueError("Each notebook entry must be a single-key mapping.")
+            notebook_name = notebook_keys[0]
+            payload = {
+                "parameters": item.get("parameters", {}),
+                "output_path": item.get("output_path"),
+            }
         parameters = dict(payload.get("parameters", {}))
         grid_yaml = parameters.get("grid_yaml")
         if isinstance(grid_yaml, str):
@@ -92,7 +108,39 @@ def _parse_notebook_entries(raw_entries: Any, base_dir: Path) -> NotebookList:
             output_path=output_path,
         )
         entries.append(NotebookEntry(notebook_name=notebook_name, config=config))
-    return NotebookList(title=title, notebooks=entries)
+    return entries
+
+
+def _parse_notebook_entries(raw_entries: Any, base_dir: Path) -> NotebookList:
+    if isinstance(raw_entries, dict):
+        title = raw_entries.get("title", "Untitled")
+        children = raw_entries.get("children") or raw_entries.get("notebooks")
+        if not isinstance(children, list):
+            raise ValueError("children must be a list of entries.")
+        sections = [NotebookSection(title=title, children=_parse_notebook_entry_list(children, base_dir))]
+        return NotebookList(sections=sections)
+
+    if isinstance(raw_entries, list):
+        if raw_entries and all(isinstance(item, dict) and "children" in item for item in raw_entries):
+            sections = []
+            for section in raw_entries:
+                title = section.get("title", "Untitled")
+                children = section.get("children")
+                if not isinstance(children, list):
+                    raise ValueError("children must be a list of entries.")
+                sections.append(NotebookSection(title=title, children=_parse_notebook_entry_list(children, base_dir)))
+            return NotebookList(sections=sections)
+        # Fall back to a single untitled section
+        return NotebookList(
+            sections=[
+                NotebookSection(
+                    title="Untitled",
+                    children=_parse_notebook_entry_list(raw_entries, base_dir),
+                )
+            ]
+        )
+
+    raise ValueError("notebooks must be a list of sections.")
 
 
 def load_yaml_params(path: Optional[Union[Path, str]]) -> Dict[str, Any]:

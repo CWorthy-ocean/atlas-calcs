@@ -7,42 +7,59 @@ dask_cluster_kwargs:
   scheduler_file: null
 
 notebooks:
-  title: "Domain Sizing"
-  notebooks:
-    - regional-domain-sizing:
-        parameters:
-          domain_name: "CCS 12km"
-          grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_ccs-12km/_grid.yml
-          test: true
-        output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_ccs-12km.ipynb
+  - title: Ocean CDR Atlas Datasets
+    children:
+    - download-oae-atlas.ipynb:
+      parameters:
+        polygon_id: 12
+        injection_year: 1999
+        injection_month: 1
+        n_test: 2
+      output_path: executed/ocean-cdr-atlas-datasets/download-oae-atlas.ipynb
+  
+  - title: Domain Sizing
+    children:       
+    - regional-domain-sizing.ipynb:
+      parameters:
+        domain_name: "CCS 12km"
+        grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_ccs-12km/_grid.yml
+        injection_year: 1999
+        injection_month: 1
+        n_test: null
+      output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_ccs-12km.ipynb
 
-    - regional-domain-sizing:
-        parameters:
-          domain_name: "Gulf Guinea Toy"
-          grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_gulf-guinea-toy/_grid.yml
-          test: true
-        output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_gulf-guinea-toy.ipynb
+    - regional-domain-sizing.ipynb:
+      parameters:
+        domain_name: "Gulf Guinea Toy"
+        grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_gulf-guinea-toy/_grid.yml
+        injection_year: 1999
+        injection_month: 1
+        n_test: null
+      output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_gulf-guinea-toy.ipynb
 
-    - regional-domain-sizing:
-        parameters:
-          domain_name: "Hvalfjörður 0"
-          grid_yaml: "cson_forge/blueprints/cson_roms-marbl_v0.1_hvalfj\xF6r\xF0ur-0/_grid.yml"
-          test: true
-        output_path: "executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_hvalfj\xF6\
-          r\xF0ur-0.ipynb"
+    - regional-domain-sizing.ipynb:
+      parameters:
+        domain_name: "Hvalfjörður 0"
+        grid_yaml: "cson_forge/blueprints/cson_roms-marbl_v0.1_hvalfj\xF6r\xF0ur-0/_grid.yml"
+        injection_year: 1999
+        injection_month: 1
+        n_test: null
+      output_path: "executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_hvalfj\xF6\
+        r\xF0ur-0.ipynb"
 
-    - regional-domain-sizing:
-        parameters:
-          domain_name: "Test Tiny"
-          grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_test-tiny/_grid.yml
-          test: true
-        output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_test-tiny.ipynb
+    - regional-domain-sizing.ipynb:
+      parameters:
+        domain_name: "WIO Toy"
+        grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_wio-toy/_grid.yml
+        injection_year: 1999
+        injection_month: 1
+        n_test: null
+      output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_wio-toy.ipynb
 
-    - regional-domain-sizing:
-        parameters:
-          domain_name: "WIO Toy"
-          grid_yaml: cson_forge/blueprints/cson_roms-marbl_v0.1_wio-toy/_grid.yml
-          test: true
-        output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_wio-toy.ipynb
-
-
+  - title: Skill Assessment
+    children:
+    - skill-assessment-glodap.ipynb:
+      parameters:
+        domain_name: "CCS 12km"
+        model_files: null
+      output_path: executed/skill-assessment/skill-assessment-glodap.ipynb

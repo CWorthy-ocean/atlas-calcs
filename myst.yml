@@ -7,13 +7,17 @@ project:
   github: https://github.com/CWorthy-Ocean/atlas-calcs
   toc:
   - file: README.md
+  - title: Ocean CDR Atlas Datasets
+    children:
+    - file: executed/ocean-cdr-atlas-datasets/download-oae-atlas.ipynb
   - title: Domain Sizing
     children:
-    - file: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_ccs-12km.ipynb
-    - file: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_gulf-guinea-toy.ipynb
-    - file: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_hvalfjörður-0.ipynb
-    - file: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_test-tiny.ipynb
-    - file: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_wio-toy.ipynb
+    - pattern: executed/domain-sizing/*
+  - title: Skill Assessment
+    children:
+    - pattern: executed/skill-assessment/*
+
+
 site:
   template: book-theme
   options:
