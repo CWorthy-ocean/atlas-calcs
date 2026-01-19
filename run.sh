@@ -29,6 +29,10 @@ if [[ -n ${2:-} ]]; then
 fi
 
 yaml_file=$1
+test_arg=""
+if $test_flag; then
+  test_arg="--test"
+fi
 
 if $sbatch_flag; then
   submit_dir="$PWD"
@@ -44,7 +48,7 @@ if $sbatch_flag; then
 
 set -euo pipefail
 cd "$submit_dir"
-./run.sh ${test_flag:+--test} "$yaml_file"
+./run.sh $test_arg "$yaml_file"
 EOF
   exit $?
 fi
@@ -72,4 +76,4 @@ if ! python -m jupyter kernelspec list 2>/dev/null | grep -q "atlas-calcs"; then
   python -m ipykernel install --user --name atlas-calcs --display-name "atlas-calcs"
 fi
 
-python application.py ${test_flag:+--test} "$yaml_file"
+echo "python application.py $test_arg $yaml_file"
