@@ -11,10 +11,10 @@ notebooks:
     children:
     - download-oae-atlas.ipynb:
       parameters:
-        polygon_id: 12
+        polygon_id: null
         injection_year: 1999
         injection_month: 1
-        n_test: 2
+        n_test: null
       output_path: executed/ocean-cdr-atlas-datasets/download-oae-atlas.ipynb
   
   - title: Domain Sizing
