@@ -8,6 +8,7 @@ dask_cluster_kwargs:
 
 notebooks:
   - title: Ocean CDR Atlas Datasets
+    use_dask_cluster: false
     children:
     - download-oae-atlas.ipynb:
       parameters:
@@ -18,6 +19,7 @@ notebooks:
       output_path: executed/ocean-cdr-atlas-datasets/download-oae-atlas.ipynb
   
   - title: Domain Sizing
+    use_dask_cluster: true
     children:       
     - regional-domain-sizing.ipynb:
       parameters:
@@ -57,6 +59,7 @@ notebooks:
       output_path: executed/domain-sizing/regional-domain-sizing_cson_roms-marbl_v0.1_wio-toy.ipynb
 
   - title: Skill Assessment
+    use_dask_cluster: false
     children:
     - skill-assessment-glodap.ipynb:
       parameters:

@@ -139,47 +139,49 @@ def main(args: Optional[Iterable[str]] = None) -> int:
         else None
     )
 
-    if utils.slurm_available():
-        cluster = utils.dask_cluster(**dask_cluster_kwargs) if dask_cluster_kwargs else None
-    else:
-        cluster = None
-    
     completed = []
     failed = []
     try:
-        for entry in app_config.notebook_list.iter_entries():
-            parameters = dict(entry.config.parameters)
-            
-            if dask_cluster_kwargs is not None:
-                parameters["dask_cluster_kwargs"] = dask_cluster_kwargs
-            if cluster is not None:
-                parameters["dask_cluster_kwargs"]["scheduler_file"] = cluster.scheduler_file
-            if parsed.test:
-                _apply_test_overrides(parameters)
-            
-            notebook_path = Path(entry.notebook_name)
-            if notebook_path.suffix == "":
-                notebook_path = notebook_path.with_suffix(".ipynb")
-            output_path = Path(entry.config.output_path)
-            if output_path.suffix == "":
-                output_path = output_path.with_suffix(".ipynb")
-            
-            logger.info("Running %s -> %s", notebook_path, output_path)
+        for section in app_config.notebook_list.sections:
+            cluster = None
+            if section.use_dask_cluster and utils.slurm_available():
+                cluster = utils.dask_cluster(**dask_cluster_kwargs) if dask_cluster_kwargs else None
             try:
-                run_notebook(
-                    notebook_path,
-                    output_path=output_path,
-                    parameters=parameters,
-                )
-                completed.append(str(output_path))
-                logger.info("Completed %s", output_path)
-            except Exception as exc:
-                failed.append(str(output_path))
-                logger.exception("Failed %s: %s", output_path, exc)
+                for entry in section.children:
+                    parameters = dict(entry.config.parameters)
+                    
+                    if dask_cluster_kwargs is not None:
+                        parameters["dask_cluster_kwargs"] = dask_cluster_kwargs
+                    if cluster is not None:
+                        parameters["dask_cluster_kwargs"]["scheduler_file"] = cluster.scheduler_file
+                    if parsed.test:
+                        _apply_test_overrides(parameters)
+                    
+                    notebook_path = Path(entry.notebook_name)
+                    if notebook_path.suffix == "":
+                        notebook_path = notebook_path.with_suffix(".ipynb")
+                    output_path = Path(entry.config.output_path)
+                    if output_path.suffix == "":
+                        output_path = output_path.with_suffix(".ipynb")
+                    
+                    logger.info("Running %s -> %s", notebook_path, output_path)
+                    try:
+                        run_notebook(
+                            notebook_path,
+                            output_path=output_path,
+                            parameters=parameters,
+                        )
+                        completed.append(str(output_path))
+                        logger.info("Completed %s", output_path)
+                    except Exception as exc:
+                        failed.append(str(output_path))
+                        logger.exception("Failed %s: %s", output_path, exc)
+            finally:
+                if cluster is not None:
+                    logger.info("Shutting down cluster")
+                    cluster.shutdown()
     finally:
-        if cluster is not None:
-            logger.info("Shutting down cluster")
-            cluster.shutdown()
+        pass
     
     if failed:
         raise RuntimeError(

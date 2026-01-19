@@ -29,6 +29,7 @@ class NotebookSection(BaseModel):
 
     title: str
     children: list[NotebookEntry]
+    use_dask_cluster: bool = False
 
     def to_toc_entry(self, base_dir: Optional[Path] = None) -> Dict[str, Any]:
         children = []
@@ -128,7 +129,14 @@ def _parse_notebook_entries(raw_entries: Any, base_dir: Path) -> NotebookList:
                 children = section.get("children")
                 if not isinstance(children, list):
                     raise ValueError("children must be a list of entries.")
-                sections.append(NotebookSection(title=title, children=_parse_notebook_entry_list(children, base_dir)))
+                use_dask_cluster = bool(section.get("use_dask_cluster", False))
+                sections.append(
+                    NotebookSection(
+                        title=title,
+                        children=_parse_notebook_entry_list(children, base_dir),
+                        use_dask_cluster=use_dask_cluster,
+                    )
+                )
             return NotebookList(sections=sections)
         # Fall back to a single untitled section
         return NotebookList(
