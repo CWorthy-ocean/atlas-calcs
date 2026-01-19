@@ -160,7 +160,7 @@ class DatasetSpec:
 
         s3_files = [entry["s3_path"] for entry in manifest]
         cache_paths = [Path(entry["cache_path"]) for entry in manifest]
-        _download_missing_files(s3_files, cache_paths, batch_size=batch_size)
+        n_downloaded = _download_missing_files(s3_files, cache_paths, batch_size=batch_size)
         return manifest
 
     def open_dataset(self, polygon_id=None, injection_year=None, injection_month=None, n_test=None):
