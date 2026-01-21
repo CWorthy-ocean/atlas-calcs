@@ -82,4 +82,9 @@ fi
 
 python -m ipykernel install --sys-prefix --name "$kernel_name" --display-name "$kernel_name"
 
-python -m atlas_engine.application --kernel "$kernel_name" "$test_arg" "$yaml_file"
+cmd=(python -m atlas_engine.application --kernel "$kernel_name")
+if [[ -n ${test_arg:-} ]]; then
+  cmd+=("$test_arg")
+fi
+cmd+=("$yaml_file")
+"${cmd[@]}"
