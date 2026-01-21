@@ -82,7 +82,26 @@ class dask_cluster(object):
             "link"
         ] = "{JUPYTERHUB_SERVICE_PREFIX}proxy/{host}:{port}/status"
         
-        self._connect_client()
+        try:
+            self._connect_client()
+        except RuntimeError:
+            # If the provided scheduler_file is stale, fall back to launching
+            # a new cluster when possible.
+            if self.scheduler_file is not None and account is not None:
+                print(
+                    "Failed to connect to existing scheduler. "
+                    "Launching a new Dask cluster."
+                )
+                self.scheduler_file, self.jobid = self._launch_dask_cluster(
+                    account=account,
+                    n_nodes=n_nodes,
+                    n_tasks_per_node=n_tasks_per_node,
+                    wallclock=wallclock,
+                    queue_name=queue_name,
+                )
+                self._connect_client()
+            else:
+                raise
         self.dashboard_link = f"{JUPYTERHUB_URL}{self.client.dashboard_link}"
 
 
