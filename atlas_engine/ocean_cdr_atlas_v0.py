@@ -396,14 +396,14 @@ class AtlasModelGridAnalyzer:
         within_mask = within_mask_flat.reshape(nlat, nlon)
 
         field_flat = self.polygon_id_mask.copy().where(within_mask, 0.0).where(self.atlas_grid.KMT > 0).values.ravel()
-        field_flat[:] = np.nan
+        field_flat[:] = -1.0
         for n, id in enumerate(field_by_id.polygon_id.values):
             ndx = np.where(self.polygon_id_mask.values.ravel() == id)[0]
             field_flat[ndx] = field_by_id[n]
 
         field_mapped = self.polygon_id_mask.copy()
-        field_mapped.values = field_flat.reshape(nlat, nlon)        
-        return field_mapped
+        field_mapped.values = field_flat.reshape(nlat, nlon)
+        return field_mapped.where(self.atlas_grid.KMT > 0)        
 
     def integrate_fg_co2_polygon_by_id(
         self, polygon_id, injection_year, injection_month, years=None, n_test=None
