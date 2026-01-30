@@ -13,9 +13,6 @@ project:
   - title: Domain Sizing
     children:
     - pattern: executed/domain-sizing/*
-  - title: Skill Assessment
-    children:
-    - pattern: executed/skill-assessment/*
 
 
 site:
